@@ -1,0 +1,15 @@
+*.session
+node_modules/
+.venv/
+.env
+__pycache__/
+*.pyc
+dist/
+build/
+*.egg-info/
+.ipynb_checkpoints/
+/*.log
+*.DS_Store
+photos/
+images/
+.xlsx

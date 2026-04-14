@@ -1,0 +1,140 @@
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client start | trace=48b887500630 | user_id=1350600699 | conversation_id=conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f | input_len=109 | files=0 | images=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=48b887500630 | stage=input_payload.build.start
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=48b887500630 | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=48b887500630 | stage=responses.create.start | conversation_id=conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client start | trace=2242614bd6b1 | user_id=1350600699 | conversation_id=conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f | input_len=70 | files=0 | images=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=2242614bd6b1 | stage=input_payload.build.start
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=2242614bd6b1 | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=2242614bd6b1 | stage=responses.create.start | conversation_id=conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client start | trace=bcc508b4f91a | user_id=1350600699 | conversation_id=conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f | input_len=77 | files=0 | images=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=bcc508b4f91a | stage=input_payload.build.start
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=bcc508b4f91a | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=bcc508b4f91a | stage=responses.create.start | conversation_id=conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client start | trace=90ac8e1f6290 | user_id=1028698156 | conversation_id=conv_69a5e36dbebc8190bfe24c5483f4d1b60dc314d116997a70 | input_len=93 | files=0 | images=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=90ac8e1f6290 | stage=input_payload.build.start
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=90ac8e1f6290 | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=90ac8e1f6290 | stage=responses.create.start | conversation_id=conv_69a5e36dbebc8190bfe24c5483f4d1b60dc314d116997a70
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client start | trace=6673a0cc743e | user_id=1350600699 | conversation_id=conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f | input_len=75 | files=0 | images=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=6673a0cc743e | stage=input_payload.build.start
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=6673a0cc743e | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=6673a0cc743e | stage=responses.create.start | conversation_id=conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client start | trace=3a5d6582e2af | user_id=1350600699 | conversation_id=conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f | input_len=89 | files=0 | images=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=3a5d6582e2af | stage=input_payload.build.start
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=3a5d6582e2af | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=3a5d6582e2af | stage=responses.create.start | conversation_id=conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f
+2026-03-02 14:10:48 [WARNING] ProfessorClient: Conversation id conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f is invalid for Responses API, creating a new one and retrying.
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=bcc508b4f91a | stage=conversation.retry_create.start | user_id=1350600699
+2026-03-02 14:10:48 [WARNING] ProfessorClient: Conversation id conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f is invalid for Responses API, creating a new one and retrying.
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=3a5d6582e2af | stage=conversation.retry_create.start | user_id=1350600699
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client start | trace=6a1f41331541 | user_id=453547390 | conversation_id=conv_69a5cca8b3908194945bdd5f06a79da6079b809e820b1662 | input_len=85 | files=0 | images=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=6a1f41331541 | stage=input_payload.build.start
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=6a1f41331541 | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=6a1f41331541 | stage=responses.create.start | conversation_id=conv_69a5cca8b3908194945bdd5f06a79da6079b809e820b1662
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=3a5d6582e2af | stage=conversation.retry_create.done | conversation_id=conv_69a5eec89ee88190bd00e8dbda2d5fbb0d59c5251f102532 | elapsed_ms=133
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=3a5d6582e2af | stage=responses.retry_create.start | conversation_id=conv_69a5eec89ee88190bd00e8dbda2d5fbb0d59c5251f102532
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client start | trace=19e202206b64 | user_id=745817045 | conversation_id=conv_69a5e6c9a02c8193843bee0b824121c4092ca0af4d53edd0 | input_len=133 | files=0 | images=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=19e202206b64 | stage=input_payload.build.start
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=19e202206b64 | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=19e202206b64 | stage=responses.create.start | conversation_id=conv_69a5e6c9a02c8193843bee0b824121c4092ca0af4d53edd0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=bcc508b4f91a | stage=conversation.retry_create.done | conversation_id=conv_69a5eec8b54481908722a4c13ec84cde0ce6108a6fb3667f | elapsed_ms=367
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=bcc508b4f91a | stage=responses.retry_create.start | conversation_id=conv_69a5eec8b54481908722a4c13ec84cde0ce6108a6fb3667f
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client start | trace=0465c167bd33 | user_id=1350600699 | conversation_id=conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f | input_len=89 | files=0 | images=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=0465c167bd33 | stage=input_payload.build.start
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=0465c167bd33 | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:48 [INFO] ProfessorClient: AI client step | trace=0465c167bd33 | stage=responses.create.start | conversation_id=conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f
+2026-03-02 14:10:49 [WARNING] ProfessorClient: Conversation id conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f is invalid for Responses API, creating a new one and retrying.
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=0465c167bd33 | stage=conversation.retry_create.start | user_id=1350600699
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=0465c167bd33 | stage=conversation.retry_create.done | conversation_id=conv_69a5eec91d9c8197aa764dc5f82fbb6608841cc40343fcea | elapsed_ms=118
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=0465c167bd33 | stage=responses.retry_create.start | conversation_id=conv_69a5eec91d9c8197aa764dc5f82fbb6608841cc40343fcea
+2026-03-02 14:10:49 [WARNING] ProfessorClient: Conversation id conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f is invalid for Responses API, creating a new one and retrying.
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=2242614bd6b1 | stage=conversation.retry_create.start | user_id=1350600699
+2026-03-02 14:10:49 [WARNING] ProfessorClient: Conversation id conv_69a5db7cbc88819788ce35b101c41d7508a01280b3f6591f is invalid for Responses API, creating a new one and retrying.
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=6673a0cc743e | stage=conversation.retry_create.start | user_id=1350600699
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=6673a0cc743e | stage=conversation.retry_create.done | conversation_id=conv_69a5eec95b8c819691a4ab60102394780dd734bc583d2fb4 | elapsed_ms=127
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=6673a0cc743e | stage=responses.retry_create.start | conversation_id=conv_69a5eec95b8c819691a4ab60102394780dd734bc583d2fb4
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=2242614bd6b1 | stage=conversation.retry_create.done | conversation_id=conv_69a5eec94ec48196a8aa92e87d4b8f920b584509ec682e20 | elapsed_ms=197
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=2242614bd6b1 | stage=responses.retry_create.start | conversation_id=conv_69a5eec94ec48196a8aa92e87d4b8f920b584509ec682e20
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client start | trace=ac9aff95141b | user_id=969878037 | conversation_id=conv_69a5eec84e188197931f2ed52689cec00fe7f2b320146ea0 | input_len=142 | files=0 | images=0
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=ac9aff95141b | stage=input_payload.build.start
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=ac9aff95141b | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=ac9aff95141b | stage=responses.create.start | conversation_id=conv_69a5eec84e188197931f2ed52689cec00fe7f2b320146ea0
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client start | trace=d83698b146c8 | user_id=62210781 | conversation_id=conv_69a5eec85a908190ae0682c91dcaafaa07e7eed125265871 | input_len=176 | files=0 | images=0
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=d83698b146c8 | stage=input_payload.build.start
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=d83698b146c8 | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=d83698b146c8 | stage=responses.create.start | conversation_id=conv_69a5eec85a908190ae0682c91dcaafaa07e7eed125265871
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client start | trace=2342c87263af | user_id=1015131079 | conversation_id=conv_69a5eec8574081909be5859cdfb321d309388c728f2f4a8c | input_len=99 | files=0 | images=0
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=2342c87263af | stage=input_payload.build.start
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=2342c87263af | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=2342c87263af | stage=responses.create.start | conversation_id=conv_69a5eec8574081909be5859cdfb321d309388c728f2f4a8c
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client start | trace=02fa343114eb | user_id=1366804444 | conversation_id=conv_69a5eec884688194864a3f171d31ece60c2a6e5f22a2bf6c | input_len=72 | files=0 | images=0
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=02fa343114eb | stage=input_payload.build.start
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=02fa343114eb | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=02fa343114eb | stage=responses.create.start | conversation_id=conv_69a5eec884688194864a3f171d31ece60c2a6e5f22a2bf6c
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client start | trace=db8f71ebcf17 | user_id=1096323662 | conversation_id=conv_69a5eec89ca48194a046f7734f6b15e10c3ac8f8dcce6049 | input_len=92 | files=0 | images=0
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=db8f71ebcf17 | stage=input_payload.build.start
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=db8f71ebcf17 | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=db8f71ebcf17 | stage=responses.create.start | conversation_id=conv_69a5eec89ca48194a046f7734f6b15e10c3ac8f8dcce6049
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client start | trace=bf5a67b9f6de | user_id=268360547 | conversation_id=conv_69a5eec884e48197ae158c4aea9ef705063dd718c2dcb15e | input_len=72 | files=0 | images=0
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=bf5a67b9f6de | stage=input_payload.build.start
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=bf5a67b9f6de | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:49 [INFO] ProfessorClient: AI client step | trace=bf5a67b9f6de | stage=responses.create.start | conversation_id=conv_69a5eec884e48197ae158c4aea9ef705063dd718c2dcb15e
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client start | trace=1db5f56aafbc | user_id=5796100030 | conversation_id=conv_69a5eec8969481968b62cde1c14cdfc70d305c85b6580dac | input_len=181 | files=0 | images=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=1db5f56aafbc | stage=input_payload.build.start
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=1db5f56aafbc | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=1db5f56aafbc | stage=responses.create.start | conversation_id=conv_69a5eec8969481968b62cde1c14cdfc70d305c85b6580dac
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client start | trace=35a2553bae1a | user_id=62210781 | conversation_id=conv_69a5eec8b17c8197aaf882466183e6be0830c24a2af8709f | input_len=176 | files=0 | images=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=35a2553bae1a | stage=input_payload.build.start
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=35a2553bae1a | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=35a2553bae1a | stage=responses.create.start | conversation_id=conv_69a5eec8b17c8197aaf882466183e6be0830c24a2af8709f
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client start | trace=c9b4bdecd5a9 | user_id=1015131079 | conversation_id=conv_69a5eec8ad9c8190be2423ac6c8773e70d3e6606cbe79313 | input_len=90 | files=0 | images=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=c9b4bdecd5a9 | stage=input_payload.build.start
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=c9b4bdecd5a9 | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=c9b4bdecd5a9 | stage=responses.create.start | conversation_id=conv_69a5eec8ad9c8190be2423ac6c8773e70d3e6606cbe79313
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client start | trace=5edda63f7cec | user_id=62210781 | conversation_id=conv_69a5eec8b17c8197aaf882466183e6be0830c24a2af8709f | input_len=77 | files=0 | images=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=5edda63f7cec | stage=input_payload.build.start
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=5edda63f7cec | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=5edda63f7cec | stage=responses.create.start | conversation_id=conv_69a5eec8b17c8197aaf882466183e6be0830c24a2af8709f
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client start | trace=b54b0ffb34c0 | user_id=62210781 | conversation_id=conv_69a5eec8b17c8197aaf882466183e6be0830c24a2af8709f | input_len=77 | files=0 | images=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=b54b0ffb34c0 | stage=input_payload.build.start
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=b54b0ffb34c0 | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=b54b0ffb34c0 | stage=responses.create.start | conversation_id=conv_69a5eec8b17c8197aaf882466183e6be0830c24a2af8709f
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client start | trace=77dcac85f4b1 | user_id=268360547 | conversation_id=conv_69a5eec884e48197ae158c4aea9ef705063dd718c2dcb15e | input_len=127 | files=0 | images=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=77dcac85f4b1 | stage=input_payload.build.start
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=77dcac85f4b1 | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=77dcac85f4b1 | stage=responses.create.start | conversation_id=conv_69a5eec884e48197ae158c4aea9ef705063dd718c2dcb15e
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client start | trace=3426bfb28947 | user_id=1015131079 | conversation_id=conv_69a5eec8ad9c8190be2423ac6c8773e70d3e6606cbe79313 | input_len=94 | files=0 | images=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=3426bfb28947 | stage=input_payload.build.start
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=3426bfb28947 | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=3426bfb28947 | stage=responses.create.start | conversation_id=conv_69a5eec8ad9c8190be2423ac6c8773e70d3e6606cbe79313
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client start | trace=c5e85df22156 | user_id=7371992259 | conversation_id=conv_69a5eec84c6881908e042558e6ed579500550d7557557ba7 | input_len=183 | files=0 | images=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=c5e85df22156 | stage=input_payload.build.start
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=c5e85df22156 | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=c5e85df22156 | stage=responses.create.start | conversation_id=conv_69a5eec84c6881908e042558e6ed579500550d7557557ba7
+2026-03-02 14:10:50 [WARNING] ProfessorClient: Conversation id conv_69a5eec8b17c8197aaf882466183e6be0830c24a2af8709f is invalid for Responses API, creating a new one and retrying.
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=b54b0ffb34c0 | stage=conversation.retry_create.start | user_id=62210781
+2026-03-02 14:10:50 [WARNING] ProfessorClient: Conversation id conv_69a5eec8b17c8197aaf882466183e6be0830c24a2af8709f is invalid for Responses API, creating a new one and retrying.
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=5edda63f7cec | stage=conversation.retry_create.start | user_id=62210781
+2026-03-02 14:10:50 [WARNING] ProfessorClient: Conversation id conv_69a5eec884e48197ae158c4aea9ef705063dd718c2dcb15e is invalid for Responses API, creating a new one and retrying.
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=77dcac85f4b1 | stage=conversation.retry_create.start | user_id=268360547
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=5edda63f7cec | stage=conversation.retry_create.done | conversation_id=conv_69a5eeca8aa08190bdc61fef2e94bcd50afec88410c04341 | elapsed_ms=121
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=5edda63f7cec | stage=responses.retry_create.start | conversation_id=conv_69a5eeca8aa08190bdc61fef2e94bcd50afec88410c04341
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=b54b0ffb34c0 | stage=conversation.retry_create.done | conversation_id=conv_69a5eeca8a3c8197825d75b2ffd13f44095f002dd5ca3949 | elapsed_ms=137
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=b54b0ffb34c0 | stage=responses.retry_create.start | conversation_id=conv_69a5eeca8a3c8197825d75b2ffd13f44095f002dd5ca3949
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=77dcac85f4b1 | stage=conversation.retry_create.done | conversation_id=conv_69a5eeca927081958bf1b5d052c2064607bc3be13457f737 | elapsed_ms=126
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=77dcac85f4b1 | stage=responses.retry_create.start | conversation_id=conv_69a5eeca927081958bf1b5d052c2064607bc3be13457f737
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client start | trace=88529633d33d | user_id=1088344282 | conversation_id=conv_69a5eec8a7e08190838478ae61fd74a2000210c052e2aee8 | input_len=183 | files=0 | images=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=88529633d33d | stage=input_payload.build.start
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=88529633d33d | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=88529633d33d | stage=responses.create.start | conversation_id=conv_69a5eec8a7e08190838478ae61fd74a2000210c052e2aee8
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client start | trace=03b5751e1d56 | user_id=7371992259 | conversation_id=conv_69a5eec8a4788195b70c4d576cb7253c09536941d5730ed1 | input_len=100 | files=0 | images=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=03b5751e1d56 | stage=input_payload.build.start
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=03b5751e1d56 | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:50 [INFO] ProfessorClient: AI client step | trace=03b5751e1d56 | stage=responses.create.start | conversation_id=conv_69a5eec8a4788195b70c4d576cb7253c09536941d5730ed1
+2026-03-02 14:10:51 [INFO] ProfessorClient: AI client start | trace=b6f909d1c63b | user_id=7371992259 | conversation_id=conv_69a5eec8b3c08197bedb8967ec130b3e00a904236c341a60 | input_len=78 | files=0 | images=0
+2026-03-02 14:10:51 [INFO] ProfessorClient: AI client step | trace=b6f909d1c63b | stage=input_payload.build.start
+2026-03-02 14:10:51 [INFO] ProfessorClient: AI client step | trace=b6f909d1c63b | stage=input_payload.build.done | payload_kind=text | elapsed_ms=0
+2026-03-02 14:10:51 [INFO] ProfessorClient: AI client step | trace=b6f909d1c63b | stage=responses.create.start | conversation_id=conv_69a5eec8b3c08197bedb8967ec130b3e00a904236c341a60
+2026-03-02 14:10:51 [WARNING] ProfessorClient: Conversation id conv_69a5eec8ad9c8190be2423ac6c8773e70d3e6606cbe79313 is invalid for Responses API, creating a new one and retrying.
+2026-03-02 14:10:51 [INFO] ProfessorClient: AI client step | trace=3426bfb28947 | stage=conversation.retry_create.start | user_id=1015131079
+2026-03-02 14:10:51 [INFO] ProfessorClient: AI client step | trace=3426bfb28947 | stage=conversation.retry_create.done | conversation_id=conv_69a5eecb9adc819584c425fc64a999f50f22519ddc3ff2a1 | elapsed_ms=139
+2026-03-02 14:10:51 [INFO] ProfessorClient: AI client step | trace=3426bfb28947 | stage=responses.retry_create.start | conversation_id=conv_69a5eecb9adc819584c425fc64a999f50f22519ddc3ff2a1

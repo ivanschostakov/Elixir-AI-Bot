@@ -1,0 +1,146 @@
+2026-03-02 14:10:45 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 14:10:45 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 14:10:45 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 14:10:45 [INFO] aiogram.dispatcher: Run polling for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 14:10:45 [INFO] aiogram.dispatcher: Run polling for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 14:10:45 [INFO] aiogram.dispatcher: Run polling for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 14:10:49 [WARNING] aiogram.dispatcher: Received SIGINT signal
+2026-03-02 14:10:49 [INFO] aiogram.dispatcher: Polling stopped for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 14:10:49 [INFO] aiogram.dispatcher: Polling stopped
+2026-03-02 14:12:20 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 14:12:20 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 14:12:20 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 14:12:20 [INFO] aiogram.dispatcher: Run polling for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 14:12:20 [INFO] aiogram.dispatcher: Run polling for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 14:12:20 [INFO] aiogram.dispatcher: Run polling for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 14:12:25 [WARNING] aiogram.dispatcher: Received SIGINT signal
+2026-03-02 14:12:25 [INFO] aiogram.dispatcher: Polling stopped for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 14:12:25 [INFO] aiogram.dispatcher: Polling stopped
+2026-03-02 14:13:37 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 14:13:37 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 14:13:37 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 14:13:38 [INFO] aiogram.dispatcher: Run polling for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 14:13:38 [INFO] aiogram.dispatcher: Run polling for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 14:13:38 [INFO] aiogram.dispatcher: Run polling for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 14:14:29 [WARNING] aiogram.dispatcher: Received SIGINT signal
+2026-03-02 14:14:29 [INFO] aiogram.dispatcher: Polling stopped for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 14:14:29 [INFO] aiogram.dispatcher: Polling stopped
+2026-03-02 16:03:52 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:03:52 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:03:52 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:03:53 [INFO] aiogram.dispatcher: Run polling for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:03:53 [INFO] aiogram.dispatcher: Run polling for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 16:03:53 [INFO] aiogram.dispatcher: Run polling for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 16:04:00 [WARNING] aiogram.dispatcher: Received SIGINT signal
+2026-03-02 16:04:00 [INFO] aiogram.dispatcher: Polling stopped for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 16:04:00 [INFO] aiogram.dispatcher: Polling stopped
+2026-03-02 16:05:10 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:05:10 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:05:10 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:05:10 [INFO] aiogram.dispatcher: Run polling for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:05:10 [INFO] aiogram.dispatcher: Run polling for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 16:05:10 [INFO] aiogram.dispatcher: Run polling for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 16:05:22 [WARNING] aiogram.dispatcher: Received SIGINT signal
+2026-03-02 16:05:22 [INFO] aiogram.dispatcher: Polling stopped for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 16:05:22 [INFO] aiogram.dispatcher: Polling stopped
+2026-03-02 16:13:55 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:13:55 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:13:55 [INFO] aiogram.dispatcher: Run polling for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 16:13:55 [INFO] aiogram.dispatcher: Run polling for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 16:13:55 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:13:55 [INFO] aiogram.dispatcher: Run polling for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:14:38 [WARNING] aiogram.dispatcher: Received SIGINT signal
+2026-03-02 16:14:38 [INFO] aiogram.dispatcher: Polling stopped for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:14:38 [INFO] aiogram.dispatcher: Polling stopped
+2026-03-02 16:14:43 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:14:43 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:14:43 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:14:43 [INFO] aiogram.dispatcher: Run polling for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:14:43 [INFO] aiogram.dispatcher: Run polling for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 16:14:43 [INFO] aiogram.dispatcher: Run polling for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 16:15:30 [WARNING] aiogram.dispatcher: Received SIGINT signal
+2026-03-02 16:15:30 [INFO] aiogram.dispatcher: Polling stopped for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 16:15:30 [INFO] aiogram.dispatcher: Polling stopped
+2026-03-02 16:15:35 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:15:35 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:15:35 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:15:35 [INFO] aiogram.dispatcher: Run polling for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:15:35 [INFO] aiogram.dispatcher: Run polling for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 16:15:35 [INFO] aiogram.dispatcher: Run polling for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 16:16:15 [WARNING] aiogram.dispatcher: Received SIGINT signal
+2026-03-02 16:16:15 [INFO] aiogram.dispatcher: Polling stopped for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 16:16:15 [INFO] aiogram.dispatcher: Polling stopped
+2026-03-02 16:20:03 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:20:03 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:20:03 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:20:03 [INFO] aiogram.dispatcher: Run polling for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 16:20:03 [INFO] aiogram.dispatcher: Run polling for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 16:20:03 [INFO] aiogram.dispatcher: Run polling for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:20:45 [WARNING] aiogram.dispatcher: Received SIGINT signal
+2026-03-02 16:20:45 [INFO] aiogram.dispatcher: Polling stopped for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:20:45 [INFO] aiogram.dispatcher: Polling stopped
+2026-03-02 16:21:04 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:21:04 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:21:04 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:21:04 [INFO] aiogram.dispatcher: Run polling for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 16:21:04 [INFO] aiogram.dispatcher: Run polling for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:21:04 [INFO] aiogram.dispatcher: Run polling for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 16:21:48 [WARNING] aiogram.dispatcher: Received SIGINT signal
+2026-03-02 16:21:48 [INFO] aiogram.dispatcher: Polling stopped for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:21:48 [INFO] aiogram.dispatcher: Polling stopped
+2026-03-02 16:21:52 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:21:52 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:21:52 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:21:52 [INFO] aiogram.dispatcher: Run polling for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 16:21:52 [INFO] aiogram.dispatcher: Run polling for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:21:52 [INFO] aiogram.dispatcher: Run polling for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 16:22:47 [WARNING] aiogram.dispatcher: Received SIGINT signal
+2026-03-02 16:22:47 [INFO] aiogram.dispatcher: Polling stopped for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 16:22:47 [INFO] aiogram.dispatcher: Polling stopped
+2026-03-02 16:23:55 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:23:55 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:23:55 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:23:55 [INFO] aiogram.dispatcher: Run polling for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 16:23:55 [INFO] aiogram.dispatcher: Run polling for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 16:23:55 [INFO] aiogram.dispatcher: Run polling for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:23:58 [WARNING] aiogram.dispatcher: Received SIGINT signal
+2026-03-02 16:23:58 [INFO] aiogram.dispatcher: Polling stopped for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:23:58 [INFO] aiogram.dispatcher: Polling stopped
+2026-03-02 16:24:14 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:24:14 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:24:14 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:24:14 [INFO] aiogram.dispatcher: Run polling for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 16:24:14 [INFO] aiogram.dispatcher: Run polling for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:24:14 [INFO] aiogram.dispatcher: Run polling for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 16:24:28 [WARNING] aiogram.dispatcher: Received SIGINT signal
+2026-03-02 16:24:28 [INFO] aiogram.dispatcher: Polling stopped for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:24:28 [INFO] aiogram.dispatcher: Polling stopped
+2026-03-02 16:26:39 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:26:39 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:26:39 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 16:26:39 [INFO] aiogram.dispatcher: Run polling for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 16:26:39 [INFO] aiogram.dispatcher: Run polling for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 16:26:39 [INFO] aiogram.dispatcher: Run polling for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 16:29:44 [WARNING] aiogram.dispatcher: Received SIGINT signal
+2026-03-02 16:29:44 [INFO] aiogram.dispatcher: Polling stopped for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 16:29:44 [INFO] aiogram.dispatcher: Polling stopped
+2026-03-02 17:01:43 [ERROR] aiogram.dispatcher: Failed to fetch updates - TelegramNetworkError: HTTP Client says - Request timeout error
+2026-03-02 17:01:43 [WARNING] aiogram.dispatcher: Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8566381393)
+2026-03-02 17:01:43 [ERROR] aiogram.dispatcher: Failed to fetch updates - TelegramNetworkError: HTTP Client says - Request timeout error
+2026-03-02 17:01:43 [WARNING] aiogram.dispatcher: Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 7801007442)
+2026-03-02 17:01:45 [INFO] aiogram.dispatcher: Connection established (tryings = 1, bot id = 8566381393)
+2026-03-02 17:31:54 [ERROR] aiogram.dispatcher: Failed to fetch updates - TelegramNetworkError: HTTP Client says - ClientOSError: [Errno 54] Connection reset by peer
+2026-03-02 17:31:54 [WARNING] aiogram.dispatcher: Sleep for 1.276124 seconds and try again... (tryings = 1, bot id = 7801007442)
+2026-03-02 17:31:54 [ERROR] aiogram.dispatcher: Failed to fetch updates - TelegramNetworkError: HTTP Client says - ClientOSError: [Errno 54] Connection reset by peer
+2026-03-02 17:31:54 [WARNING] aiogram.dispatcher: Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8566381393)
+2026-03-02 17:31:56 [INFO] aiogram.dispatcher: Connection established (tryings = 1, bot id = 8566381393)
+2026-03-02 17:31:56 [INFO] aiogram.dispatcher: Connection established (tryings = 2, bot id = 7801007442)
+2026-03-02 17:43:59 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 17:43:59 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 17:43:59 [INFO] aiogram.dispatcher: Start polling
+2026-03-02 17:43:59 [INFO] aiogram.dispatcher: Run polling for bot @Peptideexpertbot id=7801007442 - 'Peptideexpert'
+2026-03-02 17:43:59 [INFO] aiogram.dispatcher: Run polling for bot @ProfessorOfPeptidesbot id=8400180934 - 'Professor of peptides'
+2026-03-02 17:43:59 [INFO] aiogram.dispatcher: Run polling for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 17:44:35 [WARNING] aiogram.dispatcher: Received SIGINT signal
+2026-03-02 17:44:35 [INFO] aiogram.dispatcher: Polling stopped for bot @elixirpeptidebot id=8566381393 - 'Elixir Peptide'
+2026-03-02 17:44:35 [INFO] aiogram.dispatcher: Polling stopped
