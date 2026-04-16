@@ -176,10 +176,8 @@ class ProfessorBot(Bot):
         task.add_done_callback(_on_done)
 
     async def _safe_update_block(self, user_id: int, blocked_until: datetime):
-        try:
-            await webapp_client.update_user(user_id, {"blocked_until": blocked_until})
-        except Exception as exc:
-            self.__logger.warning("Failed to update blocked_until for user_id=%s: %s", user_id, exc)
+        try: await webapp_client.update_user(user_id, {"blocked_until": blocked_until})
+        except Exception as exc: self.__logger.warning("Failed to update blocked_until for user_id=%s: %s", user_id, exc)
 
     async def _safe_update_token_totals(self, user_id: int, input_tokens: int, output_tokens: int):
         try:
@@ -191,8 +189,7 @@ class ProfessorBot(Bot):
             await webapp_client.update_user(user_id, {"input_tokens": new_input, "output_tokens": new_output})
             self.__logger.info("Token usage | +in=%d +out=%d | prev=%d/%d | new=%d/%d", input_tokens, output_tokens, prev_input, prev_output, new_input, new_output)
             self.__logger.info("Updated tokens for %s: +%d/%d (total %d/%d)", user_id, input_tokens, output_tokens, new_input, new_output)
-        except Exception as exc:
-            self.__logger.warning("Failed to sync token totals for user_id=%s: %s", user_id, exc)
+        except Exception as exc: self.__logger.warning("Failed to sync token totals for user_id=%s: %s", user_id, exc)
 
     async def parse_response(self, response: dict, message: Message, back_menu: bool = False, adv: bool = False):
         user_id = message.from_user.id
