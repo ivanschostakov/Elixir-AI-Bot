@@ -11,7 +11,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Message, BufferedInputFile, InputMediaPhoto, InputMediaDocument, ReplyKeyboardRemove, InlineKeyboardButton
+from aiogram.types import Message, BufferedInputFile, InputMediaPhoto, InputMediaDocument, ReplyKeyboardRemove, InlineKeyboardButton, InlineQueryResultArticle, InputTextMessageContent
 
 from config import (
     PROFESSOR_BOT_TOKEN,
@@ -267,6 +267,72 @@ class ProfessorBot(Bot):
 
         return sent_message
 
+    async def parse_guest_query(self, response: dict, message: Message):
+        user_id = message.from_user.id
+        self.__logger.info("INCOMING guest_message | user_id=%s | text=%r", user_id, getattr(message, "text", None))
+
+        files = _normalize_response_files(response.get("files") or [], logger=self.__logger)
+        text: str = (response.get("text") or "").strip()
+        input_tokens: int = int(response.get("input_tokens") or 0)
+        output_tokens: int = int(response.get("output_tokens") or 0)
+
+        self.__logger.info(
+            "MODEL GUEST RESPONSE (raw) | user_id=%s | files=%d | text_len=%d | input_tokens=%d | output_tokens=%d",
+            user_id,
+            len(files),
+            len(text),
+            input_tokens,
+            output_tokens,
+        )
+
+        match = re.search(r"BLOCK_USER_TG_(\d+)", text, re.IGNORECASE)
+        if match:
+            days = int(match.group(1))
+            text = re.sub(r"BLOCK_USER_TG_\d+", "", text, flags=re.IGNORECASE).strip()
+            blocked_until = datetime.now() + timedelta(days=days) if days > 0 else datetime.max
+            self.__logger.warning("Blocking guest user for %s days (until %s)", days, blocked_until)
+            self._schedule_background("update_blocked_until", self._safe_update_block(user_id, blocked_until))
+
+        if input_tokens or output_tokens:
+            self._schedule_background("update_user_token_totals", self._safe_update_token_totals(user_id, input_tokens, output_tokens))
+
+        clean_text = _sanitize_response_text(text).replace("**", "*")
+
+        if not clean_text:
+            clean_text = "oshibochka vishla da"
+
+        if files:
+            files_hint = f"\n\n(В ответе было {len(files)} вложений. В гостевом режиме отправляется только текст.)"
+            if len(clean_text) + len(files_hint) <= MAX_TG_MSG_LEN:
+                clean_text += files_hint
+
+        if len(clean_text) > MAX_TG_MSG_LEN:
+            self.__logger.info("OUTGOING guest long text | len=%d | trimming", len(clean_text))
+            clean_text = clean_text[: MAX_TG_MSG_LEN - 2].rstrip() + "…"
+
+        try:
+            return await message.answer_guest_query(
+                result=InlineQueryResultArticle(
+                    id=f"guest:{message.message_id}",
+                    title="Ответ",
+                    input_message_content=InputTextMessageContent(
+                        message_text=clean_text,
+                        parse_mode=ParseMode.MARKDOWN,
+                    ),
+                )
+            )
+        except TelegramBadRequest as e:
+            self.__logger.warning("Markdown failed for guest response, retrying plain. err=%s", e)
+            return await message.answer_guest_query(
+                result=InlineQueryResultArticle(
+                    id=f"guest:{message.message_id}",
+                    title="Ответ",
+                    input_message_content=InputTextMessageContent(
+                        message_text=clean_text,
+                    ),
+                ),
+            )
+
 professor_bot = ProfessorBot(PROFESSOR_BOT_TOKEN, BOT_NAMES[PROFESSOR_BOT_TOKEN])
 professor_client = ProfessorClient(PROFESSOR_OPENAI_API, PROFESSOR_ASSISTANT_ID, keyword="professor")
 professor_dp = Dispatcher(storage=MemoryStorage())
@@ -284,7 +350,7 @@ dose_dp.callback_query.middleware(ContextMiddleware(dose_bot, dose_client))
 new_bot = ProfessorBot(NEW_BOT_TOKEN, BOT_NAMES[NEW_BOT_TOKEN])
 new_client = ProfessorClient(NEW_OPENAI_API, NEW_ASSISTANT_ID, keyword="new")
 new_dp = Dispatcher(storage=MemoryStorage())
-new_dp.include_routers(new_chat_router, new_admin_router, new_user_router)
+new_dp.include_routers(new_chat_router, new_admin_router, new_user_router, new_guest_router)
 new_dp.message.middleware(ContextMiddleware(new_bot, new_client, expert_client=professor_client))
 new_dp.callback_query.middleware(ContextMiddleware(new_bot, new_client, expert_client=professor_client))
 

@@ -187,13 +187,10 @@ async def handle_activate_code(message: Message, state: FSMContext):
         await message.answer(f"Номер заказа {code} уже использован")
         return await handle_user_start(message, state)
 
-    try:
-        verification = await webapp_client.verify_order_code(code)
+    try: verification = await webapp_client.verify_order_code(code)
     except WebappBotApiError as exc:
-        if exc.status_code and exc.status_code >= 500:
-            await message.answer("Не удалось проверить заказ (ошибка сервера). Попробуйте позже.")
-        else:
-            await message.answer("Не удалось проверить заказ (ошибка сети). Попробуйте позже.")
+        if exc.status_code and exc.status_code >= 500: await message.answer("Не удалось проверить заказ (ошибка сервера). Попробуйте позже.")
+        else: await message.answer("Не удалось проверить заказ (ошибка сети). Попробуйте позже.")
         user_flow_logger.warning("Order verification failed for user_id=%s code=%s err=%s", message.from_user.id, code, exc)
         return await handle_user_start(message, state)
 
@@ -539,10 +536,10 @@ async def handle_media_group(messages: list[Message], state: FSMContext, profess
     if has_unknown_last_used:
         schedule_webapp_call(safe_webapp_call(webapp_client.update_user(user_id, {"last_used": last_used}), operation="update_last_used"), operation="update_last_used")
         await _notify_user(message, user_texts.pick_fallback_free, 10)
+
     elif last_used != LAST_USED_NEW: await _notify_user(message, user_texts.premium_mode_hint, 10)
 
     if last_used != LAST_USED_NEW: return await message.answer(user_texts.expert_text_only, reply_markup=user_keyboards.upgrade_to_professor)
-
     if user.tg_phone: schedule_webapp_call(safe_webapp_call(webapp_client.update_user_name(user_id, message.from_user.first_name, message.from_user.last_name), operation="update_user_name"), operation="update_user_name")
 
     used_requests = 0 if user.tg_phone else await _get_unverified_requests_count(user_id)
@@ -582,10 +579,10 @@ async def handle_single_ai_message(message: Message, state: FSMContext, professo
     if has_unknown_last_used:
         schedule_webapp_call(safe_webapp_call(webapp_client.update_user(user_id, {"last_used": last_used}), operation="update_last_used"), operation="update_last_used")
         await _notify_user(message, user_texts.pick_fallback_free, 10)
+
     elif last_used != LAST_USED_NEW: await _notify_user(message, user_texts.premium_mode_hint, 10)
 
     if last_used != LAST_USED_NEW and has_supported_media(message): return await message.answer(user_texts.expert_text_only, reply_markup=user_keyboards.upgrade_to_professor)
-
     if user.tg_phone:schedule_webapp_call(safe_webapp_call(webapp_client.update_user_name(user_id, message.from_user.first_name, message.from_user.last_name), operation="update_user_name"), operation="update_user_name")
 
     used_requests = 0 if user.tg_phone else await _get_unverified_requests_count(user_id)
@@ -610,4 +607,5 @@ async def handle_single_ai_message(message: Message, state: FSMContext, professo
     if last_used == LAST_USED_NEW and _should_spend_premium_request(user):
         next_requests = max(int(getattr(user, "premium_requests", 0) or 0) - 1, 0)
         schedule_webapp_call(safe_webapp_call(webapp_client.update_user(message.from_user.id, {"premium_requests": next_requests}), operation="decrement_premium_requests"),operation="decrement_premium_requests")
+
     return await professor_bot.parse_response(response, message, back_menu=True)

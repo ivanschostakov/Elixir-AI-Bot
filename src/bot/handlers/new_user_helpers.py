@@ -34,9 +34,11 @@ async def _ensure_user(message: Message, professor_client):
             }
         )
         return user
+
     if not user.conversation_id:
         conversation_id = await professor_client.create_conversation(user_id=user_id)
         user = await webapp_client.update_user(user_id, {"conversation_id": conversation_id})
+
     return user
 
 
