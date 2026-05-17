@@ -1,11 +1,10 @@
 import asyncio
-import re
 from time import monotonic
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
-from config import PROFESSOR_ASSISTANT_ID, PROFESSOR_BOT_TOKEN, BOT_KEYWORDS, BOT_NAMES, ELIXIR_CHAT_ID
+from config import PROFESSOR_ASSISTANT_ID, BOT_KEYWORDS, ELIXIR_CHAT_ID
 from src.ai.helpers import CHAT_ADMIN_REPLY_FILTER
 from src.ai.webapp_client import webapp_client
 from .ai_helpers import (
@@ -22,8 +21,6 @@ professor_chat_router = Router(name="professor_chat")
 professor_chat_router.message.filter(lambda message: message.chat.id == ELIXIR_CHAT_ID)
 _MEDIA_GROUP_CACHE_TTL_SECONDS = 900
 _media_group_cache: dict[tuple[int, str], tuple[float, list[Message]]] = {}
-_BOT_USERNAME = (BOT_NAMES.get(PROFESSOR_BOT_TOKEN, "") or "").strip().lower().lstrip("@")
-_BOT_MENTION_RE = re.compile(rf"(?<!\w)@{re.escape(_BOT_USERNAME)}\b", re.IGNORECASE) if _BOT_USERNAME else None
 
 
 def _cleanup_cached_media_groups() -> None:
@@ -70,15 +67,6 @@ async def _ensure_target_user(reply_message: Message, conversation_client):
         }
     )
     return user
-
-
-def _has_bot_mention(message: Message) -> bool:
-    if _BOT_MENTION_RE is None:
-        return False
-    source_text = (message.text or message.caption or "").strip()
-    if not source_text:
-        return False
-    return bool(_BOT_MENTION_RE.search(source_text))
 
 
 @professor_chat_router.message(MediaGroupFilter())
@@ -135,8 +123,9 @@ async def answer_ai(message: Message, professor_bot, expert_client=None):
 
 @professor_chat_router.message(lambda message: not (message.text and message.text.strip().startswith("/")) and ((message.text and message.text.strip()) or (message.caption and message.caption.strip()) or message.photo or message.video or message.video_note or message.document or message.voice))
 async def handle_mentioned_message(message: Message, professor_bot, expert_client=None):
-    if not _has_bot_mention(message):
-        return None
+    bot_username = f"@{(await message.bot.get_me()).username}"
+
+    if not (message.text.strip().startswith(bot_username) and message.text.removeprefix(bot_username).strip()): return None
     if not message.from_user: return None
     if expert_client is None:
         professor_bot.log.error("Mention received without expert_client")
