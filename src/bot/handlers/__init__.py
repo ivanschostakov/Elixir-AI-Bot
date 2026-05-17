@@ -1,17 +1,17 @@
-from .admin import professor_admin_router, dose_admin_router, new_admin_router
-from .user import professor_user_router, dose_user_router
-from .new_user import new_user_router
-from .new_guest import new_guest_router
-from .new_chat import new_chat_router
-from .new_admin import new_admin_router
+from .admin import expert_admin_router, professor_admin_router, dose_admin_router
+from .user import expert_user_router, dose_user_router
+from .new_user import professor_user_router
+from .new_guest import professor_guest_router
+from .new_chat import professor_chat_router
+from . import new_admin as _professor_admin_handlers  # noqa: F401 - register extra professor admin handlers
 
 __all__ = [
+    "expert_user_router",
+    "expert_admin_router",
     "professor_user_router",
     "professor_admin_router",
-    "new_user_router",
-    "new_guest_router",
+    "professor_guest_router",
     "dose_user_router",
     "dose_admin_router",
-    "new_admin_router",
-    "new_chat_router",
+    "professor_chat_router",
 ]

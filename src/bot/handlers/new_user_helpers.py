@@ -9,10 +9,13 @@ from src.bot.states import user_states
 from src.ai.webapp_client import webapp_client
 
 PHONE_GATE_BOTS = ("professor", "dose")
-DEFAULT_LAST_USED = "professor"
 UNVERIFIED_REQUEST_LIMIT = 5
-LAST_USED_PROFESSOR = "professor"
-LAST_USED_NEW = "new"
+LAST_USED_EXPERT = "professor"
+LAST_USED_PROFESSOR = "new"
+DEFAULT_LAST_USED = LAST_USED_EXPERT
+
+# Backward-compatible alias used across legacy handlers.
+LAST_USED_NEW = LAST_USED_PROFESSOR
 
 async def _request_phone(message: Message, state: FSMContext, full_name: str | None = None):
     await state.set_state(user_states.Registration.phone)
@@ -46,15 +49,15 @@ async def _get_unverified_requests_count(user_id: int) -> int:
     return await webapp_client.get_user_total_requests(user_id, PHONE_GATE_BOTS)
 
 def _normalize_last_used(last_used: str | None) -> str:
-    return LAST_USED_NEW if last_used == LAST_USED_NEW else LAST_USED_PROFESSOR
+    return LAST_USED_PROFESSOR if last_used == LAST_USED_PROFESSOR else LAST_USED_EXPERT
 
 def _resolve_last_used(user) -> tuple[str, bool]:
     raw_last_used = getattr(user, "last_used", None) if user else None
     normalized = _normalize_last_used(raw_last_used)
-    return normalized, raw_last_used not in {LAST_USED_PROFESSOR, LAST_USED_NEW}
+    return normalized, raw_last_used not in {LAST_USED_EXPERT, LAST_USED_PROFESSOR}
 
 def _resolve_mode_client(last_used: str | None, professor_client, expert_client=None):
-    if _normalize_last_used(last_used) == LAST_USED_NEW: return professor_client
+    if _normalize_last_used(last_used) == LAST_USED_PROFESSOR: return professor_client
     return expert_client or professor_client
 
 def _has_active_subscription(user) -> bool:

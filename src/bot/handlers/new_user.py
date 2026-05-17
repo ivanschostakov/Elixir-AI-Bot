@@ -12,7 +12,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import FSInputFile, Message, CallbackQuery, ReplyKeyboardRemove, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
 from config import OWNER_TG_IDS, UFA_TZ, DATA_DIR, WEBAPP_BASE_DOMAIN
-from src.bot.handlers.new_user_helpers import _get_unverified_requests_count, _request_phone, _ensure_user, _should_spend_premium_request, LAST_USED_NEW, _can_use_professor_mode, _resolve_mode_client, _resolve_last_used, LAST_USED_PROFESSOR, UNVERIFIED_REQUEST_LIMIT
+from src.bot.handlers.new_user_helpers import _get_unverified_requests_count, _request_phone, _ensure_user, _should_spend_premium_request, _can_use_professor_mode, _resolve_mode_client, _resolve_last_used, LAST_USED_EXPERT, LAST_USED_PROFESSOR, UNVERIFIED_REQUEST_LIMIT
 from src.calc import generate_drug_graphs, plot_filled_scale
 from src.ai.helpers import CHAT_NOT_BANNED_FILTER, _notify_user, with_action, _fmt, check_blocked
 from src.ai.webapp_client import WebappBotApiError, webapp_client
@@ -35,12 +35,12 @@ async def _(x: Message):
     await asyncio.sleep(15)
     await x.delete()
 
-new_user_router = Router(name="shop_user")
+professor_user_router = Router(name="shop_professor")
 graph_request_logger = logging.getLogger("aiogram.graph_lifecycle")
 user_flow_logger = logging.getLogger("aiogram.shop_user")
 graph_generation_lock = asyncio.Lock()
-new_user_router.message.filter(lambda message: message.from_user.id not in OWNER_TG_IDS and message.chat.type == ChatType.PRIVATE, check_blocked, CHAT_NOT_BANNED_FILTER)
-new_user_router.callback_query.filter(lambda call: call.data.startswith("user") and call.from_user.id not in OWNER_TG_IDS and call.message.chat.type == ChatType.PRIVATE, check_blocked, CHAT_NOT_BANNED_FILTER)
+professor_user_router.message.filter(lambda message: message.from_user.id not in OWNER_TG_IDS and message.chat.type == ChatType.PRIVATE, check_blocked, CHAT_NOT_BANNED_FILTER)
+professor_user_router.callback_query.filter(lambda call: call.data.startswith("user") and call.from_user.id not in OWNER_TG_IDS and call.message.chat.type == ChatType.PRIVATE, check_blocked, CHAT_NOT_BANNED_FILTER)
 
 UTM_FIELDS = ("utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_creative")
 
@@ -119,38 +119,38 @@ async def _send_product_deep_link_preview(message: Message, product_id: str) -> 
     )
 
 
-@new_user_router.message(Command('shop'))
+@professor_user_router.message(Command('shop'))
 async def app(message: Message):
     await message.answer(user_texts.offer, reply_markup=user_keyboards.open_app)
 
-@new_user_router.message(Command('about'))
+@professor_user_router.message(Command('about'))
 async def about(message: Message):
     x = await message.answer(user_texts.about)
     asyncio.create_task(_(x))
 
-@new_user_router.message(Command('offer'))
+@professor_user_router.message(Command('offer'))
 async def offer(message: Message):
     x = await message.answer_document(FSInputFile(DATA_DIR / 'offer.pdf'), caption=user_texts.offer)
     asyncio.create_task(_(x))
 
-@new_user_router.message(Command('clicks'))
+@professor_user_router.message(Command('clicks'))
 async def clicks(message: Message, state: FSMContext):
     await message.answer(user_texts.cartridge_volume, reply_markup=user_keyboards.cartridge_volume)
     await state.set_state(user_states.CalculateClicks.cartridge_volume)
     await message.delete()
 
-@new_user_router.message(Command('divisions'))
+@professor_user_router.message(Command('divisions'))
 async def divisions(message: Message, state: FSMContext):
     await message.answer(user_texts.vial_amount, reply_markup=user_keyboards.back)
     await state.set_state(user_states.CalculateDivisions.vial_amount)
     await message.delete()
 
-@new_user_router.message(Command('graph'))
+@professor_user_router.message(Command('graph'))
 async def graph(message: Message):
     await message.answer(user_texts.choose_peptide, reply_markup=user_keyboards.peptides_keyboard)
     await message.delete()
 
-@new_user_router.message(CommandStart(deep_link=True, deep_link_encoded=True))
+@professor_user_router.message(CommandStart(deep_link=True, deep_link_encoded=True))
 async def handle_encoded_deep_start(message: Message, command: CommandObject, state: FSMContext):
     raw_payload, params = _parse_start_payload(command.args)
     await _capture_first_touch_utm(message, params, raw_payload)
@@ -159,7 +159,7 @@ async def handle_encoded_deep_start(message: Message, command: CommandObject, st
         return await _send_product_deep_link_preview(message, product_id)
     return await handle_user_start(message, state)
 
-@new_user_router.message(CommandStart(deep_link=True))
+@professor_user_router.message(CommandStart(deep_link=True))
 async def handle_deep_start(message: Message, command: CommandObject, state: FSMContext):
     raw_payload, params = _parse_start_payload(command.args)
     await _capture_first_touch_utm(message, params, raw_payload)
@@ -169,7 +169,7 @@ async def handle_deep_start(message: Message, command: CommandObject, state: FSM
     return await handle_user_start(message, state)
 
 
-@new_user_router.message(CommandStart())
+@professor_user_router.message(CommandStart())
 async def handle_user_start(message: Message, state: FSMContext):
     user_id = message.from_user.id
     await state.clear()
@@ -177,7 +177,7 @@ async def handle_user_start(message: Message, state: FSMContext):
     if user and user.tg_phone: schedule_webapp_call(safe_webapp_call(webapp_client.update_user_name(user_id, message.from_user.first_name, message.from_user.last_name), operation="update_user_name"), operation="update_user_name")
     return await message.answer(user_texts.greetings.replace('full_name', message.from_user.full_name), reply_markup=user_keyboards.main_menu)
 
-@new_user_router.message(user_states.Ai.activate_code)
+@professor_user_router.message(user_states.Ai.activate_code)
 async def handle_activate_code(message: Message, state: FSMContext):
     code = (message.text or "").strip()
     if not code: return await message.answer("Введите номер заказа.")
@@ -233,7 +233,7 @@ async def handle_activate_code(message: Message, state: FSMContext):
         "Иначе вы будете заблокированы на один день за попытку активации чужого заказа."
     )
 
-@new_user_router.message(user_states.Ai.verification_code)
+@professor_user_router.message(user_states.Ai.verification_code)
 async def handle_verification_code(message: Message, state: FSMContext):
     state_data = await state.get_data()
     entered_code = message.text.strip()
@@ -270,7 +270,7 @@ async def handle_verification_code(message: Message, state: FSMContext):
     return None
 
 
-@new_user_router.message(user_states.Registration.phone)
+@professor_user_router.message(user_states.Registration.phone)
 async def handle_user_registration(message: Message, state: FSMContext, professor_bot, professor_client):
     if not message.contact: return await message.answer(user_texts.verify_phone.replace('*', message.from_user.full_name), reply_markup=user_keyboards.phone)
     phone = message.contact.phone_number
@@ -279,7 +279,7 @@ async def handle_user_registration(message: Message, state: FSMContext, professo
     await message.answer('Проверка пройдена успешно ✅', reply_markup=ReplyKeyboardRemove())
     return await handle_user_start(message, state)
 
-@new_user_router.message(user_states.CalculateClicks.cartridge_volume, lambda message: message.text and message.text.strip())
+@professor_user_router.message(user_states.CalculateClicks.cartridge_volume, lambda message: message.text and message.text.strip())
 async def handle_cartridge_volume(message: Message, state: FSMContext):
     try: amount = float(message.text.strip().replace(',', '.'))
     except: return await message.answer(user_texts.num_format_error, reply_markup=user_keyboards.back)
@@ -288,7 +288,7 @@ async def handle_cartridge_volume(message: Message, state: FSMContext):
     return await message.answer(user_texts.cartridge_amount, reply_markup=user_keyboards.back)
 
 
-@new_user_router.message(user_states.CalculateClicks.cartridge_amount, lambda message: message.text and message.text.strip())
+@professor_user_router.message(user_states.CalculateClicks.cartridge_amount, lambda message: message.text and message.text.strip())
 async def handle_cartridge_amount(message: Message, state: FSMContext):
     try: amount = float(message.text.strip().replace(',', '.'))
     except: return await message.answer(user_texts.num_format_error, reply_markup=user_keyboards.back)
@@ -297,7 +297,7 @@ async def handle_cartridge_amount(message: Message, state: FSMContext):
     return await message.answer(user_texts.desired_dosage, reply_markup=user_keyboards.back)
 
 
-@new_user_router.message(user_states.CalculateClicks.desired_dosage, lambda message: message.text and message.text.strip())
+@professor_user_router.message(user_states.CalculateClicks.desired_dosage, lambda message: message.text and message.text.strip())
 async def handle_desired_dosage_clicks(message: Message, state: FSMContext):
     try: dosage_mg = float(message.text.strip().replace(',', '.'))
     except: return await message.answer(user_texts.num_format_error, reply_markup=user_keyboards.back)
@@ -320,7 +320,7 @@ async def handle_desired_dosage_clicks(message: Message, state: FSMContext):
     return await state.clear()
 
 
-@new_user_router.message(user_states.CalculateDivisions.vial_amount, lambda message: message.text and message.text.strip())
+@professor_user_router.message(user_states.CalculateDivisions.vial_amount, lambda message: message.text and message.text.strip())
 async def handle_vial_amount(message: Message, state: FSMContext):
     try: amount = float(message.text.strip().replace(',', '.'))
     except: return await message.answer(user_texts.num_format_error, reply_markup=user_keyboards.back)
@@ -329,7 +329,7 @@ async def handle_vial_amount(message: Message, state: FSMContext):
     return await message.answer(user_texts.water_volume, reply_markup=user_keyboards.back)
 
 
-@new_user_router.message(user_states.CalculateDivisions.water_volume, lambda message: message.text and message.text.strip())
+@professor_user_router.message(user_states.CalculateDivisions.water_volume, lambda message: message.text and message.text.strip())
 async def handle_water_volume(message: Message, state: FSMContext):
     try: amount = float(message.text.strip().replace(',', '.'))
     except: return await message.answer(user_texts.num_format_error, reply_markup=user_keyboards.back)
@@ -338,7 +338,7 @@ async def handle_water_volume(message: Message, state: FSMContext):
     return await message.answer(user_texts.desired_dosage, reply_markup=user_keyboards.back)
 
 
-@new_user_router.message(user_states.CalculateDivisions.desired_dosage, lambda message: message.text and message.text.strip())
+@professor_user_router.message(user_states.CalculateDivisions.desired_dosage, lambda message: message.text and message.text.strip())
 async def handle_desired_dosage_divisions(message: Message, state: FSMContext):
     try: desired_dosage_mg = float(message.text.strip().replace(",", "."))
     except: return await message.answer(user_texts.num_format_error, reply_markup=user_keyboards.back)
@@ -393,7 +393,7 @@ async def handle_desired_dosage_divisions(message: Message, state: FSMContext):
     return await state.clear()
 
 
-@new_user_router.message(user_states.Graph.dosage, lambda message: message.text and message.text.strip())
+@professor_user_router.message(user_states.Graph.dosage, lambda message: message.text and message.text.strip())
 async def handle_dosage_graph(message: Message, state: FSMContext):
     try: amount = float(message.text.strip().replace(',', '.'))
     except: return await message.answer(user_texts.num_format_error, reply_markup=user_keyboards.back)
@@ -402,7 +402,7 @@ async def handle_dosage_graph(message: Message, state: FSMContext):
     return await message.answer(user_texts.course_length_weeks, reply_markup=user_keyboards.back)
 
 
-@new_user_router.message(user_states.Graph.course_length_weeks, lambda message: message.text and message.text.strip())
+@professor_user_router.message(user_states.Graph.course_length_weeks, lambda message: message.text and message.text.strip())
 async def handle_course_length_weeks(message: Message, state: FSMContext):
     try: amount = float(message.text.strip().replace(',', '.'))
     except: return await message.answer(user_texts.num_format_error, reply_markup=user_keyboards.back)
@@ -411,7 +411,7 @@ async def handle_course_length_weeks(message: Message, state: FSMContext):
     return await message.answer(user_texts.course_interval_days, reply_markup=user_keyboards.back)
 
 
-@new_user_router.message(user_states.Graph.course_interval_days, lambda message: message.text and message.text.strip())
+@professor_user_router.message(user_states.Graph.course_interval_days, lambda message: message.text and message.text.strip())
 async def handle_course_interval_days(message: Message, state: FSMContext):
     try: interval_days = float(message.text.strip().replace(',', '.'))
     except: return await message.answer(user_texts.num_format_error, reply_markup=user_keyboards.back)
@@ -445,7 +445,7 @@ async def handle_course_interval_days(message: Message, state: FSMContext):
             try: fpath.unlink(missing_ok=True)
             except Exception: graph_request_logger.exception("Failed to remove graph file: %s", fpath)
 
-@new_user_router.message(Command('new_chat'))
+@professor_user_router.message(Command('new_chat'))
 async def handle_new_chat(message: Message, state: FSMContext, professor_client, expert_client=None):
     user = await webapp_client.get_user("tg_id", message.from_user.id)
     last_used, has_unknown_last_used = _resolve_last_used(user)
@@ -455,7 +455,7 @@ async def handle_new_chat(message: Message, state: FSMContext, professor_client,
     await safe_webapp_call(webapp_client.upsert_user({"tg_id": message.from_user.id, "name": message.from_user.first_name, "surname": message.from_user.last_name, "conversation_id": conversation_id, "last_used": last_used}), operation="upsert_conversation_id")
     return await message.answer(user_texts.new_chat)
 
-@new_user_router.callback_query()
+@professor_user_router.callback_query()
 async def handle_user_call(call: CallbackQuery, state: FSMContext):
     data = call.data.removeprefix("user:").split(":")
     if data[0] == "about": return await about(call.message)
@@ -470,7 +470,7 @@ async def handle_user_call(call: CallbackQuery, state: FSMContext):
                         "tg_id": call.from_user.id,
                         "name": call.from_user.first_name,
                         "surname": call.from_user.last_name,
-                        "last_used": LAST_USED_PROFESSOR,
+                        "last_used": LAST_USED_EXPERT,
                     }
                 ),
                 operation="set_last_used_free",
@@ -481,7 +481,7 @@ async def handle_user_call(call: CallbackQuery, state: FSMContext):
             user = await webapp_client.get_user("tg_id", call.from_user.id)
             if not user or not user.tg_phone: return await _request_phone(call.message, state, call.from_user.full_name)
             await safe_webapp_call(
-                webapp_client.update_user(call.from_user.id, {"last_used": LAST_USED_NEW}),
+                webapp_client.update_user(call.from_user.id, {"last_used": LAST_USED_PROFESSOR}),
                 operation="set_last_used_premium",
             )
             await call.message.edit_text(user_texts.pick_premium, reply_markup=user_keyboards.back)
@@ -523,7 +523,7 @@ async def handle_user_call(call: CallbackQuery, state: FSMContext):
     return None
 
 
-@new_user_router.message(MediaGroupFilter())
+@professor_user_router.message(MediaGroupFilter())
 @media_group_handler()
 async def handle_media_group(messages: list[Message], state: FSMContext, professor_bot, professor_client, expert_client=None):
     message = messages[0]
@@ -537,14 +537,14 @@ async def handle_media_group(messages: list[Message], state: FSMContext, profess
         schedule_webapp_call(safe_webapp_call(webapp_client.update_user(user_id, {"last_used": last_used}), operation="update_last_used"), operation="update_last_used")
         await _notify_user(message, user_texts.pick_fallback_free, 10)
 
-    elif last_used != LAST_USED_NEW: await _notify_user(message, user_texts.premium_mode_hint, 10)
+    elif last_used != LAST_USED_PROFESSOR: await _notify_user(message, user_texts.premium_mode_hint, 10)
 
-    if last_used != LAST_USED_NEW: return await message.answer(user_texts.expert_text_only, reply_markup=user_keyboards.upgrade_to_professor)
+    if last_used != LAST_USED_PROFESSOR: return await message.answer(user_texts.expert_text_only, reply_markup=user_keyboards.upgrade_to_professor)
     if user.tg_phone: schedule_webapp_call(safe_webapp_call(webapp_client.update_user_name(user_id, message.from_user.first_name, message.from_user.last_name), operation="update_user_name"), operation="update_user_name")
 
     used_requests = 0 if user.tg_phone else await _get_unverified_requests_count(user_id)
-    if not user.tg_phone and (last_used == LAST_USED_NEW or used_requests >= UNVERIFIED_REQUEST_LIMIT): return await _request_phone(message, state)
-    if last_used == LAST_USED_NEW and not _can_use_professor_mode(user): return await message.answer(user_texts.premium_limit_0, reply_markup=user_keyboards.only_free)
+    if not user.tg_phone and (last_used == LAST_USED_PROFESSOR or used_requests >= UNVERIFIED_REQUEST_LIMIT): return await _request_phone(message, state)
+    if last_used == LAST_USED_PROFESSOR and not _can_use_professor_mode(user): return await message.answer(user_texts.premium_limit_0, reply_markup=user_keyboards.only_free)
 
     response = await safe_ai_response(message, send_message_v2_from_media_group(messages=messages, professor_client=active_client, user_id=user_id, conversation_id=user.conversation_id))
     if response is None: return None
@@ -561,14 +561,14 @@ async def handle_media_group(messages: list[Message], state: FSMContext, profess
         ),
         operation="write_usage",
     )
-    if last_used == LAST_USED_NEW and _should_spend_premium_request(user):
+    if last_used == LAST_USED_PROFESSOR and _should_spend_premium_request(user):
         next_requests = max(int(getattr(user, "premium_requests", 0) or 0) - 1, 0)
         schedule_webapp_call(safe_webapp_call(webapp_client.update_user(message.from_user.id, {"premium_requests": next_requests}), operation="decrement_premium_requests"), operation="decrement_premium_requests")
 
     return await professor_bot.parse_response(response, message, back_menu=True)
 
 
-@new_user_router.message(lambda message: not message.media_group_id and ((message.text and message.text.strip()) or (message.caption and message.caption.strip()) or message.photo or message.video or message.video_note or message.document or message.voice))
+@professor_user_router.message(lambda message: not message.media_group_id and ((message.text and message.text.strip()) or (message.caption and message.caption.strip()) or message.photo or message.video or message.video_note or message.document or message.voice))
 @with_action()
 async def handle_single_ai_message(message: Message, state: FSMContext, professor_bot, professor_client, expert_client=None):
     user_id = message.from_user.id
@@ -580,14 +580,14 @@ async def handle_single_ai_message(message: Message, state: FSMContext, professo
         schedule_webapp_call(safe_webapp_call(webapp_client.update_user(user_id, {"last_used": last_used}), operation="update_last_used"), operation="update_last_used")
         await _notify_user(message, user_texts.pick_fallback_free, 10)
 
-    elif last_used != LAST_USED_NEW: await _notify_user(message, user_texts.premium_mode_hint, 10)
+    elif last_used != LAST_USED_PROFESSOR: await _notify_user(message, user_texts.premium_mode_hint, 10)
 
-    if last_used != LAST_USED_NEW and has_supported_media(message): return await message.answer(user_texts.expert_text_only, reply_markup=user_keyboards.upgrade_to_professor)
+    if last_used != LAST_USED_PROFESSOR and has_supported_media(message): return await message.answer(user_texts.expert_text_only, reply_markup=user_keyboards.upgrade_to_professor)
     if user.tg_phone:schedule_webapp_call(safe_webapp_call(webapp_client.update_user_name(user_id, message.from_user.first_name, message.from_user.last_name), operation="update_user_name"), operation="update_user_name")
 
     used_requests = 0 if user.tg_phone else await _get_unverified_requests_count(user_id)
-    if not user.tg_phone and (last_used == LAST_USED_NEW or used_requests >= UNVERIFIED_REQUEST_LIMIT): return await _request_phone(message, state)
-    if last_used == LAST_USED_NEW and not _can_use_professor_mode(user): return await message.answer(user_texts.premium_limit_0, reply_markup=user_keyboards.only_free)
+    if not user.tg_phone and (last_used == LAST_USED_PROFESSOR or used_requests >= UNVERIFIED_REQUEST_LIMIT): return await _request_phone(message, state)
+    if last_used == LAST_USED_PROFESSOR and not _can_use_professor_mode(user): return await message.answer(user_texts.premium_limit_0, reply_markup=user_keyboards.only_free)
 
     response = await safe_ai_response(message, send_message_v2_from_telegram(message=message, professor_client=active_client, user_id=user_id, conversation_id=user.conversation_id))
     if response is None: return None
@@ -604,7 +604,7 @@ async def handle_single_ai_message(message: Message, state: FSMContext, professo
         ),
         operation="write_usage",
     )
-    if last_used == LAST_USED_NEW and _should_spend_premium_request(user):
+    if last_used == LAST_USED_PROFESSOR and _should_spend_premium_request(user):
         next_requests = max(int(getattr(user, "premium_requests", 0) or 0) - 1, 0)
         schedule_webapp_call(safe_webapp_call(webapp_client.update_user(message.from_user.id, {"premium_requests": next_requests}), operation="decrement_premium_requests"),operation="decrement_premium_requests")
 

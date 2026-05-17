@@ -14,14 +14,18 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Message, BufferedInputFile, InputMediaPhoto, InputMediaDocument, ReplyKeyboardRemove, InlineKeyboardButton, InlineQueryResultArticle, InputTextMessageContent
 
 from config import (
-    PROFESSOR_BOT_TOKEN,
+    EXPERT_BOT_TOKEN,
     DOSE_BOT_TOKEN,
     DOSE_ASSISTANT_ID,
     DOSE_OPENAI_API,
-    NEW_BOT_TOKEN,
-    NEW_ASSISTANT_ID,
+    PROFESSOR_BOT_TOKEN,
+    PROFESSOR_ASSISTANT_ID,
     LOGS_DIR,
-    BOT_NAMES, NEW_OPENAI_API, PROFESSOR_OPENAI_API, PROFESSOR_ASSISTANT_ID, )
+    BOT_NAMES,
+    PROFESSOR_OPENAI_API,
+    EXPERT_OPENAI_API,
+    EXPERT_ASSISTANT_ID,
+)
 from src.bot.handlers import *
 from src.ai.helpers import split_text, MAX_TG_MSG_LEN
 from src.bot.keyboards import user_keyboards
@@ -119,7 +123,7 @@ class ProfessorBot(Bot):
     def log(self): return self.__logger
 
     async def create_user(self, user_id: int, phone: str, name: str = None, surname: str = None) -> str:
-        conversation_id = await professor_client.create_conversation(user_id=user_id)
+        conversation_id = await expert_client.create_conversation(user_id=user_id)
         await webapp_client.upsert_user({"tg_id": user_id, "tg_phone": phone, "name": name, "surname": surname, "conversation_id": conversation_id})
         self.__logger.info("Created new user: %s, phone=%s", user_id, phone)
         return conversation_id
@@ -333,34 +337,50 @@ class ProfessorBot(Bot):
                 ),
             )
 
-professor_bot = ProfessorBot(PROFESSOR_BOT_TOKEN, BOT_NAMES[PROFESSOR_BOT_TOKEN])
-professor_client = ProfessorClient(PROFESSOR_OPENAI_API, PROFESSOR_ASSISTANT_ID, keyword="professor")
-professor_dp = Dispatcher(storage=MemoryStorage())
-professor_dp.include_routers(professor_admin_router, professor_user_router)
-professor_dp.message.middleware(ContextMiddleware(professor_bot, professor_client))
-professor_dp.callback_query.middleware(ContextMiddleware(professor_bot, professor_client))
+expert_bot = ProfessorBot(EXPERT_BOT_TOKEN, BOT_NAMES[EXPERT_BOT_TOKEN])
+expert_client = ProfessorClient(EXPERT_OPENAI_API, EXPERT_ASSISTANT_ID, keyword="professor")
+expert_dp = Dispatcher(storage=MemoryStorage())
+expert_dp.include_routers(expert_admin_router, expert_user_router)
+expert_dp.message.middleware(ContextMiddleware(expert_bot, expert_client, role="expert"))
+expert_dp.callback_query.middleware(ContextMiddleware(expert_bot, expert_client, role="expert"))
 
 dose_bot = ProfessorBot(DOSE_BOT_TOKEN, BOT_NAMES[DOSE_BOT_TOKEN])
 dose_client = ProfessorClient(DOSE_OPENAI_API, DOSE_ASSISTANT_ID, keyword="dose")
 dose_dp = Dispatcher(storage=MemoryStorage())
 dose_dp.include_routers(dose_admin_router, dose_user_router)
-dose_dp.message.middleware(ContextMiddleware(dose_bot, dose_client))
-dose_dp.callback_query.middleware(ContextMiddleware(dose_bot, dose_client))
+dose_dp.message.middleware(ContextMiddleware(dose_bot, dose_client, role="expert"))
+dose_dp.callback_query.middleware(ContextMiddleware(dose_bot, dose_client, role="expert"))
 
-new_bot = ProfessorBot(NEW_BOT_TOKEN, BOT_NAMES[NEW_BOT_TOKEN])
-new_client = ProfessorClient(NEW_OPENAI_API, NEW_ASSISTANT_ID, keyword="new")
-new_dp = Dispatcher(storage=MemoryStorage())
-new_dp.include_routers(new_chat_router, new_admin_router, new_user_router, new_guest_router)
-new_dp.message.middleware(ContextMiddleware(new_bot, new_client, expert_client=professor_client))
-new_dp.callback_query.middleware(ContextMiddleware(new_bot, new_client, expert_client=professor_client))
+professor_bot = ProfessorBot(PROFESSOR_BOT_TOKEN, BOT_NAMES[PROFESSOR_BOT_TOKEN])
+professor_client = ProfessorClient(PROFESSOR_OPENAI_API, PROFESSOR_ASSISTANT_ID, keyword="new")
+professor_dp = Dispatcher(storage=MemoryStorage())
+professor_dp.include_routers(professor_chat_router, professor_admin_router, professor_user_router, professor_guest_router)
+professor_dp.message.middleware(
+    ContextMiddleware(
+        professor_bot,
+        professor_client,
+        role="professor",
+        expert_bot=expert_bot,
+        expert_client=expert_client,
+    )
+)
+professor_dp.callback_query.middleware(
+    ContextMiddleware(
+        professor_bot,
+        professor_client,
+        role="professor",
+        expert_bot=expert_bot,
+        expert_client=expert_client,
+    )
+)
 
 
-async def run_professor_bot():
-    polling_logger.info("Professor bot polling init: deleting webhook")
-    await professor_bot.delete_webhook(drop_pending_updates=False)
-    polling_logger.info("Professor bot webhook deleted: starting polling")
-    await professor_dp.start_polling(professor_bot)
-    polling_logger.warning("Professor bot start_polling returned")
+async def run_expert_bot():
+    polling_logger.info("Expert bot polling init: deleting webhook")
+    await expert_bot.delete_webhook(drop_pending_updates=False)
+    polling_logger.info("Expert bot webhook deleted: starting polling")
+    await expert_dp.start_polling(expert_bot)
+    polling_logger.warning("Expert bot start_polling returned")
 
 
 async def run_dose_bot():
@@ -371,9 +391,9 @@ async def run_dose_bot():
     polling_logger.warning("Dose bot start_polling returned")
 
 
-async def run_new_bot():
-    polling_logger.info("New bot polling init: deleting webhook")
-    await new_bot.delete_webhook(drop_pending_updates=False)
-    polling_logger.info("New bot webhook deleted: starting polling")
-    await new_dp.start_polling(new_bot)
-    polling_logger.warning("New bot start_polling returned")
+async def run_professor_bot():
+    polling_logger.info("Professor bot polling init: deleting webhook")
+    await professor_bot.delete_webhook(drop_pending_updates=False)
+    polling_logger.info("Professor bot webhook deleted: starting polling")
+    await professor_dp.start_polling(professor_bot)
+    polling_logger.warning("Professor bot start_polling returned")

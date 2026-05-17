@@ -23,7 +23,7 @@ from src.bot.handlers.new_admin_helpers import (
     _user_search_results,
 )
 from src.bot.texts import admin_texts
-from src.bot.handlers import new_admin_router
+from .admin import professor_admin_router
 from src.bot.keyboards import admin_keyboards
 from src.bot.states import admin_states
 from src.ai.helpers import make_excel_safe
@@ -252,25 +252,25 @@ async def _send_utm_statistics_report(message: Message, start_date: date, end_da
         pass
 
 
-@new_admin_router.message(CommandStart())
+@professor_admin_router.message(CommandStart())
 async def handle_start(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(admin_texts.greeting, reply_markup=admin_keyboards.admin_menu)
     await message.delete()
 
-@new_admin_router.message(Command('deeplink'))
+@professor_admin_router.message(Command('deeplink'))
 async def handle_link(message: Message, state: FSMContext):
     await message.answer(await create_start_link(message.bot, message.text.removeprefix('/deeplink '), encode=True))
 
 
-@new_admin_router.message(Command('edit_and_pin'), lambda message: message.reply_to_message)
+@professor_admin_router.message(Command('edit_and_pin'), lambda message: message.reply_to_message)
 async def handle_pin(message: Message):
     forwarded_message = message.reply_to_message
     c_id = forwarded_message.forward_from_chat.id
     m_id = forwarded_message.forward_from_message_id
     await message.bot.edit_message_reply_markup(message_id=m_id,  chat_id=c_id, reply_markup=admin_keyboards.open_test)
 
-@new_admin_router.message(Command('set_premium'))
+@professor_admin_router.message(Command('set_premium'))
 async def add_premium(message: Message):
     phone = message.text.removeprefix("/set_premium ").strip()
     if phone:
@@ -288,7 +288,7 @@ async def add_premium(message: Message):
         else: await message.answer("Ошибка команды: пользователь не пользовался ботом или не был найден в базе")
         return None
 
-@new_admin_router.message(Command("statistics"))
+@professor_admin_router.message(Command("statistics"))
 async def handle_statistics(message: Message):
     promos = await webapp_client.list_promos()
     carts = await webapp_client.get_carts()
@@ -404,13 +404,13 @@ async def handle_statistics(message: Message):
     except Exception: pass
 
 
-@new_admin_router.message(Command("utm_statistics"))
+@professor_admin_router.message(Command("utm_statistics"))
 async def handle_utm_statistics(message: Message, state: FSMContext):
     await state.set_state(admin_states.MainMenu.utm_statistics_time)
     await message.answer(admin_texts.utm_statistics_period, reply_markup=admin_keyboards.utm_statistics_times)
 
 
-@new_admin_router.message(admin_states.MainMenu.utm_statistics_time)
+@professor_admin_router.message(admin_states.MainMenu.utm_statistics_time)
 async def handle_utm_statistics_time(message: Message, state: FSMContext):
     period = _parse_date_range_input(message.text or "")
     if not period:
@@ -426,7 +426,7 @@ async def handle_utm_statistics_time(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(admin_texts.greeting, reply_markup=admin_keyboards.admin_menu)
 
-@new_admin_router.message(Command('get_user'))
+@professor_admin_router.message(Command('get_user'))
 async def handle_get_user(message: Message):
     user_id = message.text.removeprefix("/get_user ").strip()
     if not user_id or not user_id.isdigit(): await message.answer("Ошибка команды: <code>/get_user айди_тг</code>", reply_markup=admin_keyboards.back)
@@ -475,7 +475,7 @@ async def handle_get_user(message: Message):
         if user.blocked_until and user.blocked_until > datetime.now(UFA_TZ): user_text += f"\n\n‼️ <b>ЗАБЛОКИРОВАН ДО {user.blocked_until.date()} {user.blocked_until.hour}:{user.blocked_until.minute} по МСК ‼️</b>"
         await message.answer(user_text, reply_markup=admin_keyboards.view_user_menu(user.tg_id, len(user_carts), bool(user.blocked_until and user.blocked_until > datetime.now(UFA_TZ))))
 
-@new_admin_router.message(admin_states.ViewUser.block_days, lambda message: message.text.isdigit())
+@professor_admin_router.message(admin_states.ViewUser.block_days, lambda message: message.text.isdigit())
 async def handle_block_days(message: Message, state: FSMContext):
     state_data = await state.get_data()
     user_id = state_data["user_id"]
@@ -488,7 +488,7 @@ async def handle_block_days(message: Message, state: FSMContext):
         reply_markup=admin_keyboards.back_to_user(user.tg_id),
     )
 
-@new_admin_router.message(Command("get_cart"))
+@professor_admin_router.message(Command("get_cart"))
 async def handle_get_cart(message: Message, state: FSMContext):
     cart_id = message.text.removeprefix("/get_cart").strip()
     if not cart_id.isdigit(): await message.answer("Ошибка команды: <code>/get_cart номер_заказа</code>", reply_markup=admin_keyboards.back)
@@ -499,7 +499,7 @@ async def handle_get_cart(message: Message, state: FSMContext):
             await message.answer(f"Заказ по номеру {cart_id} не существует")
             await handle_start(message, state)
 
-@new_admin_router.callback_query()
+@professor_admin_router.callback_query()
 async def handle_new_admin_callback(call: CallbackQuery, state: FSMContext):
     data = call.data.removeprefix("admin:").split(':')
     state_data = await state.get_data()
@@ -551,7 +551,7 @@ async def handle_new_admin_callback(call: CallbackQuery, state: FSMContext):
         await state.clear()
 
 
-@new_admin_router.inline_query()
+@professor_admin_router.inline_query()
 async def handle_inline_query(inline_query: InlineQuery, state: FSMContext):
     data = inline_query.query.strip().split(maxsplit=2)
     start_input_content = InputTextMessageContent(message_text="/start", parse_mode=None)

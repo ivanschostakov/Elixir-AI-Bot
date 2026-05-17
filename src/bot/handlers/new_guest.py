@@ -6,7 +6,7 @@ from aiogram.types import Message
 from config import ELIXIR_CHAT_ID
 from src.ai.helpers import with_action
 from src.ai.webapp_client import webapp_client
-from src.bot.handlers.new_user_helpers import _ensure_user, _resolve_last_used, LAST_USED_PROFESSOR
+from src.bot.handlers.new_user_helpers import _ensure_user, _resolve_last_used, LAST_USED_EXPERT
 from .ai_helpers import (
     MediaGroupFilter,
     media_group_handler,
@@ -17,7 +17,7 @@ from .ai_helpers import (
     schedule_webapp_call,
 )
 
-new_guest_router = Router(name="shop_guest")
+professor_guest_router = Router(name="shop_professor_guest")
 guest_logger = logging.getLogger("aiogram.shop_guest")
 
 
@@ -57,7 +57,7 @@ async def _write_guest_usage(user_id: int, response: dict):
                 user_id,
                 response["input_tokens"],
                 response["output_tokens"],
-                LAST_USED_PROFESSOR,
+                LAST_USED_EXPERT,
                 cached_input_tokens=response.get("cached_input_tokens"),
             ),
             operation="write_usage",
@@ -66,7 +66,7 @@ async def _write_guest_usage(user_id: int, response: dict):
     )
 
 
-@new_guest_router.guest_message(lambda message: message.chat.id == ELIXIR_CHAT_ID, MediaGroupFilter())
+@professor_guest_router.guest_message(lambda message: message.chat.id == ELIXIR_CHAT_ID, MediaGroupFilter())
 @media_group_handler(only_album=True)
 async def handle_guest_media_group(messages: list[Message], professor_bot, expert_client=None):
     if not messages:
@@ -95,7 +95,7 @@ async def handle_guest_media_group(messages: list[Message], professor_bot, exper
     return await professor_bot.parse_guest_query(response, message)
 
 
-@new_guest_router.guest_message(
+@professor_guest_router.guest_message(
     lambda message: message.chat.id == ELIXIR_CHAT_ID and not message.media_group_id and _is_guest_payload(message)
 )
 @with_action()

@@ -12,21 +12,21 @@ from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, FSInputFile
 
-from config import ADMIN_TG_IDS, SPENDS_DIR, PROFESSOR_BOT_TOKEN, DOSE_BOT_TOKEN, UFA_TZ
+from config import ADMIN_TG_IDS, SPENDS_DIR, EXPERT_BOT_TOKEN, DOSE_BOT_TOKEN, UFA_TZ
 from src.bot.keyboards import admin_keyboards
 from src.bot.states import admin_states
 from src.ai.webapp_client import webapp_client
 from src.tg_methods import get_user_id_by_phone, normalize_phone
 
+expert_admin_router = Router(name="admin_expert")
 professor_admin_router = Router(name="admin_professor")
-new_admin_router = Router(name="admin_new")
-new_admin_router.inline_query.filter(lambda query: query.from_user.id in ADMIN_TG_IDS)
+professor_admin_router.inline_query.filter(lambda query: query.from_user.id in ADMIN_TG_IDS)
 dose_admin_router = Router(name="admin_dose")
 
+expert_admin_router.message.filter(lambda message: message.from_user.id in ADMIN_TG_IDS and message.chat.type == ChatType.PRIVATE)
+expert_admin_router.callback_query.filter(lambda call: call.data.startswith("admin") and call.from_user.id in ADMIN_TG_IDS and call.message.chat.type == ChatType.PRIVATE)
 professor_admin_router.message.filter(lambda message: message.from_user.id in ADMIN_TG_IDS and message.chat.type == ChatType.PRIVATE)
 professor_admin_router.callback_query.filter(lambda call: call.data.startswith("admin") and call.from_user.id in ADMIN_TG_IDS and call.message.chat.type == ChatType.PRIVATE)
-new_admin_router.message.filter(lambda message: message.from_user.id in ADMIN_TG_IDS and message.chat.type == ChatType.PRIVATE)
-new_admin_router.callback_query.filter(lambda call: call.data.startswith("admin") and call.from_user.id in ADMIN_TG_IDS and call.message.chat.type == ChatType.PRIVATE)
 dose_admin_router.message.filter(lambda message: message.from_user.id in ADMIN_TG_IDS and message.chat.type == ChatType.PRIVATE)
 dose_admin_router.callback_query.filter(lambda call: call.data.startswith("admin") and call.from_user.id in ADMIN_TG_IDS and call.message.chat.type == ChatType.PRIVATE)
 
@@ -146,18 +146,18 @@ async def _handle_send_cancel_callback(call: CallbackQuery):
     try: await call.message.edit_reply_markup(reply_markup=None)
     except Exception: pass
 
-@new_admin_router.message(Command("stop_send"))
-@dose_admin_router.message(Command("stop_send"))
 @professor_admin_router.message(Command("stop_send"))
+@dose_admin_router.message(Command("stop_send"))
+@expert_admin_router.message(Command("stop_send"))
 async def handle_stop_send(message: Message):
     stop_event = active_send_broadcasts.get(message.bot.id)
     if not stop_event: return await message.answer("Сейчас нет активной рассылки")
     stop_event.set()
     await message.answer("Останавливаю рассылку...")
 
-@new_admin_router.message(Command("fix"))
-@dose_admin_router.message(Command("fix"))
 @professor_admin_router.message(Command("fix"))
+@dose_admin_router.message(Command("fix"))
+@expert_admin_router.message(Command("fix"))
 async def handle_fix(message: Message):
     users = await webapp_client.get_users()
     for user in users:
@@ -174,9 +174,9 @@ async def handle_fix(message: Message):
 
 
 
-@new_admin_router.message(Command("send"))
-@dose_admin_router.message(Command("send"))
 @professor_admin_router.message(Command("send"))
+@dose_admin_router.message(Command("send"))
+@expert_admin_router.message(Command("send"))
 async def handle_send(message: Message):
     text = (message.html_text or message.text or "").strip()
     args = text.removeprefix("/send ").strip().split(maxsplit=1)
@@ -213,14 +213,14 @@ async def handle_send(message: Message):
     else: await message.answer("Ошибка команды: <code>/send тг_айди/all текст</code>")
 
 
-@professor_admin_router.message(CommandStart())
+@expert_admin_router.message(CommandStart())
 @dose_admin_router.message(CommandStart())
 async def handle_admin_start(message: Message):
     await message.answer(f'{message.from_user.full_name}, Добро пожаловать в <b>админ панель</b>\n\nВыберите действие кнопками ниже', reply_markup=admin_keyboards.main_menu, parse_mode="html")
     await message.delete()
 
+@expert_admin_router.message(Command('block'))
 @professor_admin_router.message(Command('block'))
-@new_admin_router.message(Command('block'))
 @dose_admin_router.message(Command('block'))
 async def handle_block(message: Message):
     text = (message.text or "").strip()
@@ -265,8 +265,8 @@ async def handle_block(message: Message):
 
     else: return await message.answer("<b>Ошибка команды</b>\n<code>/block phone номер_телефона</code>\n<code>/block id айди_телеграм</code>")
 
+@expert_admin_router.message(Command('unblock'))
 @professor_admin_router.message(Command('unblock'))
-@new_admin_router.message(Command('unblock'))
 @dose_admin_router.message(Command('unblock'))
 async def handle_unblock(message: Message):
     text = (message.text or "").strip()
@@ -310,8 +310,8 @@ async def handle_unblock(message: Message):
 
     else: return await message.answer("<b>Ошибка команды</b>\n<code>/unblock phone номер_телефона</code>\n<code>/unblock id айди_телеграм</code>")
 
+@expert_admin_router.message(admin_states.MainMenu.spends_time)
 @professor_admin_router.message(admin_states.MainMenu.spends_time)
-@new_admin_router.message(admin_states.MainMenu.spends_time)
 @dose_admin_router.message(admin_states.MainMenu.spends_time)
 async def handle_spends_time(message: Message):
     text = message.text.strip()
@@ -324,7 +324,7 @@ async def handle_spends_time(message: Message):
     except Exception: return await message.answer("<b>Ошибка формата промежутка.</b>\n" "Пожалуйста, следуйте примеру:\n" "<code>22.09.2025 12.10.2025</code>\n" "(можно скопировать по нажатию)", reply_markup=admin_keyboards.main_menu, parse_mode="HTML")
 
     bot_id = str(message.bot.id)
-    if bot_id == PROFESSOR_BOT_TOKEN.split(':')[0]: bot = "professor"
+    if bot_id == EXPERT_BOT_TOKEN.split(':')[0]: bot = "professor"
     elif bot_id == DOSE_BOT_TOKEN.split(':')[0]: bot = "dose"
     else: bot = "new"
 
@@ -338,7 +338,7 @@ async def handle_spends_time(message: Message):
     await message.answer_document(FSInputFile(file_path), caption=f"📊 Файл со статистикой расходов <b>{period_label}</b>", parse_mode="HTML", reply_markup=admin_keyboards.main_menu)
     return os.remove(file_path)
 
-@professor_admin_router.callback_query()
+@expert_admin_router.callback_query()
 @dose_admin_router.callback_query()
 async def handle_admin_callback(call: CallbackQuery, state: FSMContext):
     data = (call.data or "").split(":")[1:]
@@ -367,7 +367,7 @@ async def handle_admin_callback(call: CallbackQuery, state: FSMContext):
         start_date = end_date - timedelta(days=days - 1)
 
     bot_id = str(call.bot.id)
-    if bot_id == PROFESSOR_BOT_TOKEN.split(":")[0]: bot = "professor"
+    if bot_id == EXPERT_BOT_TOKEN.split(":")[0]: bot = "professor"
     elif bot_id == DOSE_BOT_TOKEN.split(":")[0]: bot = "dose"
     else: bot = "new"
 

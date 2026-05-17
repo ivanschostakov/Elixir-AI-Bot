@@ -8,17 +8,35 @@ from aiogram.types import TelegramObject
 
 
 class ContextMiddleware(BaseMiddleware):
-    def __init__(self, bot_instance, professor_client, *, expert_client=None):
+    def __init__(
+        self,
+        bot_instance,
+        bot_client,
+        *,
+        role: str = "expert",
+        expert_bot=None,
+        expert_client=None,
+    ):
         super().__init__()
         self.bot_instance = bot_instance
-        self.professor_client = professor_client
+        self.bot_client = bot_client
+        self.role = role
+        self.expert_bot = expert_bot
         self.expert_client = expert_client
         self.logger = logging.getLogger("aiogram.update_lifecycle")
 
     async def __call__(self, handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]], event: TelegramObject, data: dict[str, Any]):
-        data['professor_bot'] = self.bot_instance
-        data['professor_client'] = self.professor_client
-        if self.expert_client is not None: data['expert_client'] = self.expert_client
+        if self.role == "professor":
+            data["professor_bot"] = self.bot_instance
+            data["professor_client"] = self.bot_client
+        else:
+            data["expert_bot"] = self.bot_instance
+            data["expert_client"] = self.bot_client
+
+        if self.expert_bot is not None:
+            data["expert_bot"] = self.expert_bot
+        if self.expert_client is not None:
+            data["expert_client"] = self.expert_client
 
         update = data.get("event_update")
         update_id = getattr(update, "update_id", None)

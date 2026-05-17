@@ -3,7 +3,7 @@ import logging
 import signal
 import time
 
-from src.bot.main import run_dose_bot, run_new_bot, run_professor_bot
+from src.bot.main import run_dose_bot, run_expert_bot, run_professor_bot
 from src.logger import setup_logging
 from src.tg_methods import client as tg_client
 
@@ -59,9 +59,9 @@ async def main():
     await tg_client.start()
     stop_event = asyncio.Event()
     task_map: dict[str, asyncio.Task] = {
-        "new_bot": asyncio.create_task(_run_forever("new_bot", run_new_bot)),
-        "dose_bot": asyncio.create_task(_run_forever("dose_bot", run_dose_bot)),
         "professor_bot": asyncio.create_task(_run_forever("professor_bot", run_professor_bot)),
+        "dose_bot": asyncio.create_task(_run_forever("dose_bot", run_dose_bot)),
+        "expert_bot": asyncio.create_task(_run_forever("expert_bot", run_expert_bot)),
     }
     task_map["heartbeat"] = asyncio.create_task(_heartbeat(stop_event, task_map))
     tasks = list(task_map.values())

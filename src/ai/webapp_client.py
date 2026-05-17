@@ -13,7 +13,7 @@ from typing import Any, Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from config import API_PREFIX, INTERNAL_API_BASE_URL, NEW_BOT_TOKEN
+from config import API_PREFIX, INTERNAL_API_BASE_URL, PROFESSOR_BOT_TOKEN
 
 
 class WebappBotApiError(RuntimeError):
@@ -264,7 +264,7 @@ def _derive_encryption_key(bot_token: str, timestamp: str, nonce: str) -> bytes:
 
 def _encrypt_token(bot_token: str, timestamp: str, nonce: str) -> str:
     if not bot_token:
-        raise WebappBotApiError("NEW_BOT_TOKEN is not configured")
+        raise WebappBotApiError("PROFESSOR_BOT_TOKEN is not configured")
     token_bytes = bot_token.encode("utf-8")
     key = _derive_encryption_key(bot_token, timestamp, nonce)
     encrypted = _xor_bytes(token_bytes, key)
@@ -272,7 +272,7 @@ def _encrypt_token(bot_token: str, timestamp: str, nonce: str) -> str:
 
 
 def _auth_headers() -> dict[str, str]:
-    bot_token = NEW_BOT_TOKEN
+    bot_token = PROFESSOR_BOT_TOKEN
     timestamp = str(int(time.time()))
     nonce = uuid.uuid4().hex
     token_enc = _encrypt_token(bot_token, timestamp, nonce)
