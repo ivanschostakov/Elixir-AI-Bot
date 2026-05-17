@@ -4,7 +4,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
-from config import NEW_ASSISTANT_ID, BOT_KEYWORDS
+from config import NEW_ASSISTANT_ID, BOT_KEYWORDS, ELIXIR_CHAT_ID
 from src.ai.helpers import CHAT_ADMIN_REPLY_FILTER
 from src.ai.webapp_client import webapp_client
 from .ai_helpers import (
@@ -18,7 +18,7 @@ from .ai_helpers import (
 )
 
 new_chat_router = Router(name="new_chat")
-new_chat_router.message.filter()
+new_chat_router.message.filter(lambda message: message.chat.id == ELIXIR_CHAT_ID)
 _MEDIA_GROUP_CACHE_TTL_SECONDS = 900
 _media_group_cache: dict[tuple[int, str], tuple[float, list[Message]]] = {}
 
