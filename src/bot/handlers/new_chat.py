@@ -75,7 +75,7 @@ async def _ensure_target_user(reply_message: Message, conversation_client):
 async def remember_media_group(messages: list[Message]):
     _cache_media_group(messages)
 
-@professor_chat_router.message(Command('/new_chat'))
+@professor_chat_router.message(Command('new_chat'))
 async def new_chat(message: Message, professor_client, expert_client=None):
     user = await webapp_client.get_user("tg_id", message.from_user.id)
     last_used, has_unknown_last_used = _resolve_last_used(user)
