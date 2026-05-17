@@ -16,6 +16,7 @@ from .ai_helpers import (
     safe_webapp_call,
     schedule_webapp_call,
 )
+from .new_user_helpers import _resolve_mode_client, _resolve_last_used
 
 professor_chat_router = Router(name="professor_chat")
 professor_chat_router.message.filter(lambda message: message.chat.id == ELIXIR_CHAT_ID)
@@ -75,7 +76,15 @@ async def remember_media_group(messages: list[Message]):
     _cache_media_group(messages)
 
 @professor_chat_router.message(Command('/new_chat'))
-async def new_chat(message: Message):
+async def new_chat(message: Message, professor_client, expert_client=None):
+    user = await webapp_client.get_user("tg_id", message.from_user.id)
+    last_used, has_unknown_last_used = _resolve_last_used(user)
+    if user and has_unknown_last_used: schedule_webapp_call(safe_webapp_call(webapp_client.update_user(message.from_user.id, {"last_used": last_used}), operation="update_last_used"), operation="update_last_used")
+    active_client = _resolve_mode_client(last_used, professor_client, expert_client)
+    conversation_id = await active_client.create_conversation(user_id=message.from_user.id)
+    await safe_webapp_call(webapp_client.upsert_user({"tg_id": message.from_user.id, "name": message.from_user.first_name, "surname": message.from_user.last_name, "conversation_id": conversation_id, "last_used": last_used}), operation="upsert_conversation_id")
+
+
     async def _(x: Message):
         new = await x.reply("Для продолжения разговора <b>перейдите в личный диалог</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть бота", url=f"https://t.me/{(await message.bot.get_me()).username}")]]))
         await asyncio.sleep(120)
