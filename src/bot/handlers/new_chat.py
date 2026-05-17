@@ -1,7 +1,8 @@
+import asyncio
 from time import monotonic
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import NEW_ASSISTANT_ID, BOT_KEYWORDS
 from src.ai.helpers import CHAT_ADMIN_REPLY_FILTER
@@ -17,6 +18,7 @@ from .ai_helpers import (
 )
 
 new_chat_router = Router(name="new_chat")
+new_chat_router.message.filter()
 _MEDIA_GROUP_CACHE_TTL_SECONDS = 900
 _media_group_cache: dict[tuple[int, str], tuple[float, list[Message]]] = {}
 
@@ -72,6 +74,15 @@ async def _ensure_target_user(reply_message: Message, professor_client):
 async def remember_media_group(messages: list[Message]):
     _cache_media_group(messages)
 
+@new_chat_router.message(Command('/new_chat'))
+async def new_chat(message: Message):
+    async def _(x: Message):
+        new = await x.reply("Для продолжения разговора <b>перейдите в личный диалог</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть бота", url=f"https://t.me/{(await message.bot.get_me()).username}")]]))
+        await asyncio.sleep(120)
+        await x.delete()
+        await new.delete()
+
+    asyncio.create_task(_(message))
 
 @new_chat_router.message(CHAT_ADMIN_REPLY_FILTER, Command('answer_ai'))
 async def answer_ai(message: Message, professor_bot, professor_client=None):
@@ -120,7 +131,7 @@ async def handle_mentioned_message(message: Message, professor_bot, expert_clien
     user = await _ensure_target_user(message, expert_client)
 
     prompt_override = (
-        "ОТВЕЧАЙ КРАТКО, ПОСЛЕ ОТВЕТА СКАЖИ МНЕ ПЕРЕЙТИ С ТОБОЙ В ЛИЧНЫЙ ДИАЛОГ ЕСЛИ ЗАХОЧУ ОТВЕТЫ ДЛИННЕЕ "
+        "ОТВЕЧАЙ КРАТКО, не упомянай об этом в диалоге, ПОСЛЕ ОТВЕТА СКАЖИ МНЕ ПЕРЕЙТИ С ТОБОЙ В ЛИЧНЫЙ ДИАЛОГ ЕСЛИ ЗАХОЧУ ОТВЕТЫ ДЛИННЕЕ "
         f"{message.text.strip()}"
     ).strip()
 
