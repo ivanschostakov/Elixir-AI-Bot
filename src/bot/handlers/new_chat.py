@@ -123,7 +123,8 @@ async def answer_ai(message: Message, professor_bot, professor_client=None):
 
 @new_chat_router.message(lambda message: not (message.text and message.text.strip().startswith("/")) and ((message.text and message.text.strip()) or (message.caption and message.caption.strip()) or message.photo or message.video or message.video_note or message.document or message.voice))
 async def handle_mentioned_message(message: Message, professor_bot, expert_client=None):
-    if f"@{(await message.bot.get_me()).username}" not in message.text.strip(): return print("asdass mention fucked up")
+    bot_username = f"@{(await message.bot.get_me()).username}"
+    if not (message.text.startswith(bot_username) and message.text.removeprefix(bot_username).strip()): print(bot_username)
     if not message.from_user: return None
     if expert_client is None: return print("expert client fucked up")
 
