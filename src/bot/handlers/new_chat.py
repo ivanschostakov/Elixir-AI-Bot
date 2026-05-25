@@ -4,7 +4,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
-from config import PROFESSOR_ASSISTANT_ID, BOT_KEYWORDS, ELIXIR_CHAT_ID
+from config import EXPERT_ASSISTANT_ID, PROFESSOR_ASSISTANT_ID, BOT_KEYWORDS, ELIXIR_CHAT_ID
 from src.ai.helpers import CHAT_ADMIN_REPLY_FILTER
 from src.ai.webapp_client import webapp_client
 from .ai_helpers import (
@@ -70,6 +70,73 @@ async def _ensure_target_user(reply_message: Message, conversation_client):
     return user
 
 
+async def _answer_admin_command(
+    message: Message,
+    professor_bot,
+    response_client,
+    *,
+    usage_assistant_id: str,
+    command_name: str,
+):
+    if response_client is None:
+        professor_bot.log.error("%s called without client", command_name)
+        return None
+
+    reply_message = message.reply_to_message
+    if not isinstance(reply_message, Message) or not reply_message.from_user:
+        return False
+
+    prompt_tail = (reply_message.text or reply_message.caption or "").strip()
+    prompt_override = (
+        "ОТВЕЧАЙ КРАТКО, ПОСЛЕ ОТВЕТА СКАЖИ МНЕ ПЕРЕЙТИ С ТОБОЙ В ЛИЧНЫЙ ДИАЛОГ ЕСЛИ ЗАХОЧУ ОТВЕТЫ ДЛИННЕЕ "
+        f"{prompt_tail}"
+    ).strip()
+
+    target_user_id = reply_message.from_user.id
+    user = await _ensure_target_user(reply_message, response_client)
+    if reply_message.media_group_id:
+        album_messages = _get_cached_media_group(reply_message) or [reply_message]
+        response = await safe_ai_response(
+            message,
+            send_message_v2_from_media_group(
+                messages=album_messages,
+                professor_client=response_client,
+                user_id=target_user_id,
+                conversation_id=user.conversation_id,
+                input_text_override=prompt_override,
+            ),
+        )
+    else:
+        response = await safe_ai_response(
+            message,
+            send_message_v2_from_telegram(
+                message=reply_message,
+                professor_client=response_client,
+                user_id=target_user_id,
+                conversation_id=user.conversation_id,
+                input_text_override=prompt_override,
+            ),
+        )
+    if response is None:
+        return None
+
+    schedule_webapp_call(
+        safe_webapp_call(
+            webapp_client.write_usage(
+                target_user_id,
+                response["input_tokens"],
+                response["output_tokens"],
+                BOT_KEYWORDS[usage_assistant_id],
+                cached_input_tokens=response.get("cached_input_tokens"),
+            ),
+            operation="write_usage",
+        ),
+        operation="write_usage",
+    )
+    await message.delete()
+    return await professor_bot.parse_response(response, reply_message, back_menu=False)
+
+
 @professor_chat_router.message(MediaGroupFilter())
 @media_group_handler(only_album=True)
 async def remember_media_group(messages: list[Message]):
@@ -93,49 +160,44 @@ async def new_chat(message: Message, professor_client, expert_client=None):
 
     asyncio.create_task(_(message))
 
-@professor_chat_router.message(CHAT_ADMIN_REPLY_FILTER, Command('answer_ai'))
-async def answer_ai(message: Message, professor_bot, expert_client=None):
-    if expert_client is None:
-        professor_bot.log.error("/answer_ai called without expert_client (professor)")
-        return None
+@professor_chat_router.message(CHAT_ADMIN_REPLY_FILTER, Command('expert'))
+async def answer_expert(message: Message, professor_bot, expert_client=None):
+    return await _answer_admin_command(
+        message,
+        professor_bot,
+        expert_client,
+        usage_assistant_id=EXPERT_ASSISTANT_ID,
+        command_name="/expert",
+    )
 
-    reply_message = message.reply_to_message
-    if not isinstance(reply_message, Message) or not reply_message.from_user: return False
 
-    prompt_tail = (reply_message.text or reply_message.caption or "").strip()
-    prompt_override = (
-        "ОТВЕЧАЙ КРАТКО, ПОСЛЕ ОТВЕТА СКАЖИ МНЕ ПЕРЕЙТИ С ТОБОЙ В ЛИЧНЫЙ ДИАЛОГ ЕСЛИ ЗАХОЧУ ОТВЕТЫ ДЛИННЕЕ "
-        f"{prompt_tail}"
-    ).strip()
-
-    target_user_id = reply_message.from_user.id
-    user = await _ensure_target_user(reply_message, expert_client)
-    if reply_message.media_group_id:
-        album_messages = _get_cached_media_group(reply_message) or [reply_message]
-        response = await safe_ai_response(message, send_message_v2_from_media_group(messages=album_messages, professor_client=expert_client, user_id=target_user_id, conversation_id=user.conversation_id, input_text_override=prompt_override))
-
-    else: response = await safe_ai_response(message, send_message_v2_from_telegram(message=reply_message, professor_client=expert_client, user_id=target_user_id, conversation_id=user.conversation_id, input_text_override=prompt_override))
-    if response is None: return None
-
-    schedule_webapp_call(
-        safe_webapp_call(webapp_client.write_usage(
-            target_user_id,
-            response["input_tokens"],
-            response["output_tokens"],
-            BOT_KEYWORDS[PROFESSOR_ASSISTANT_ID],
-            cached_input_tokens=response.get("cached_input_tokens"),
-        ), operation="write_usage",
-    ), operation="write_usage")
-    await message.delete()
-    return await professor_bot.parse_response(response, reply_message, back_menu=False)
+@professor_chat_router.message(CHAT_ADMIN_REPLY_FILTER, Command('professor'))
+async def answer_professor(message: Message, professor_bot, professor_client):
+    return await _answer_admin_command(
+        message,
+        professor_bot,
+        professor_client,
+        usage_assistant_id=PROFESSOR_ASSISTANT_ID,
+        command_name="/professor",
+    )
 
 
 @professor_chat_router.message(lambda message: not (message.text and message.text.strip().startswith("/")) and ((message.text and message.text.strip()) or (message.caption and message.caption.strip()) or message.photo or message.video or message.video_note or message.document or message.voice))
 async def handle_mentioned_message(message: Message, professor_bot, expert_client=None):
-    bot_username = f"@{(await message.bot.get_me()).username}"
+    bot_username = f"@{(await message.bot.get_me()).username}".lower()
+    source_text = (message.text or message.caption or "").strip()
+    if not source_text:
+        return None
 
-    if not (message.text.strip().startswith(bot_username) and message.text.removeprefix(bot_username).strip()): return None
-    if not message.from_user: return None
+    source_text_lc = source_text.lower()
+    if not source_text_lc.endswith(bot_username):
+        return None
+
+    query_text = source_text[: -len(bot_username)].strip()
+    if not query_text:
+        return None
+    if not message.from_user:
+        return None
     if expert_client is None:
         professor_bot.log.error("Mention received without expert_client")
         return None
@@ -145,7 +207,7 @@ async def handle_mentioned_message(message: Message, professor_bot, expert_clien
 
     prompt_override = (
         "ОТВЕЧАЙ КРАТКО, не упомянай об этом в диалоге, ПОСЛЕ ОТВЕТА СКАЖИ МНЕ ПЕРЕЙТИ С ТОБОЙ В ЛИЧНЫЙ ДИАЛОГ ЕСЛИ ЗАХОЧУ ОТВЕТЫ ДЛИННЕЕ "
-        f"{(message.text or message.caption or '').strip()}"
+        f"{query_text}"
     ).strip()
 
     if message.media_group_id:
@@ -160,7 +222,7 @@ async def handle_mentioned_message(message: Message, professor_bot, expert_clien
             target_user_id,
             response["input_tokens"],
             response["output_tokens"],
-            BOT_KEYWORDS[PROFESSOR_ASSISTANT_ID],
+            BOT_KEYWORDS[EXPERT_ASSISTANT_ID],
             cached_input_tokens=response.get("cached_input_tokens"),
         ), operation="write_usage"), operation="write_usage",
     )
