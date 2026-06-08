@@ -428,11 +428,19 @@ async def handle_utm_statistics_time(message: Message, state: FSMContext):
 
 @professor_admin_router.message(Command('get_user'))
 async def handle_get_user(message: Message):
-    user_id = message.text.removeprefix("/get_user ").strip()
-    if not user_id or not user_id.isdigit(): await message.answer("Ошибка команды: <code>/get_user айди_тг</code>", reply_markup=admin_keyboards.back)
+    raw_value = message.text.removeprefix("/get_user ").strip()
+    if not raw_value: await message.answer("Ошибка команды: <code>/get_user телефон_или_айди_тг</code>", reply_markup=admin_keyboards.back)
     else:
-        user = await webapp_client.get_user("tg_id", int(user_id))
-        if not user: return await message.answer(f"Пользователь с айди {user_id} не найден", reply_markup=admin_keyboards.back)
+        phone = normalize_phone(raw_value)
+        user = None
+        if phone:
+            phone_candidates = [phone, phone.removeprefix("+")]
+            for candidate in dict.fromkeys(phone_candidates):
+                user = await webapp_client.get_user("tg_phone", candidate)
+                if user: break
+        if not user and raw_value.isdigit():
+            user = await webapp_client.get_user("tg_id", int(raw_value))
+        if not user: return await message.answer(f"Пользователь с телефоном или айди {raw_value} не найден", reply_markup=admin_keyboards.back)
         token_usages = await webapp_client.get_user_usage_totals(user.tg_id)
         user_carts = [cart for cart in await webapp_client.get_user_carts(user.tg_id)]
 
