@@ -206,16 +206,24 @@ async def handle_activate_code(message: Message, state: FSMContext):
     email = verification.email
     verification_code = verification.verification_code
 
+    if verification.status == "not_found" or price == "not_found":
+        await message.answer(f"Заказ не был найден по номеру {code}")
+        return await handle_user_start(message, state)
+
+    if verification.status == "smtp_failed":
+        await message.answer("Заказ найден, но не удалось отправить код подтверждения на почту. Попробуйте позже или обратитесь в поддержку.")
+        return await handle_user_start(message, state)
+
+    if verification.status == "no_email":
+        await message.answer("Заказ найден, но в контакте не указана корректная почта. Обратитесь в поддержку.")
+        return await handle_user_start(message, state)
+
     if price == "old":
         await message.answer("Для активации заказов со старого сайта, пожалуйста, обратитесь к администрации.")
         return await handle_user_start(message, state)
 
     elif price == "low":
         await message.answer("Сожалеем, считываются заказы от 5000р. Каждые 5000р = 1 месяц.")
-        return await handle_user_start(message, state)
-
-    elif price == "not_found":
-        await message.answer(f"Заказ не был найден по номеру {code}")
         return await handle_user_start(message, state)
 
     if not email or not verification_code:
