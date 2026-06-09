@@ -2,6 +2,7 @@ import base64
 import asyncio
 import httpx
 import logging
+import re
 
 from datetime import datetime, timedelta
 from urllib.parse import parse_qs
@@ -39,6 +40,13 @@ professor_user_router = Router(name="shop_professor")
 graph_request_logger = logging.getLogger("aiogram.graph_lifecycle")
 user_flow_logger = logging.getLogger("aiogram.shop_user")
 graph_generation_lock = asyncio.Lock()
+
+def _normalize_order_code_input(value: str | int | None) -> str:
+    code = str(value or "").strip()
+    code = re.sub(r"^\s*заказ\s*", "", code, flags=re.IGNORECASE)
+    code = re.sub(r"^\s*[№#]\s*", "", code)
+    return code.strip()
+
 professor_user_router.message.filter(lambda message: message.from_user.id not in OWNER_TG_IDS and message.chat.type == ChatType.PRIVATE, check_blocked, CHAT_NOT_BANNED_FILTER)
 professor_user_router.callback_query.filter(lambda call: call.data.startswith("user") and call.from_user.id not in OWNER_TG_IDS and call.message.chat.type == ChatType.PRIVATE, check_blocked, CHAT_NOT_BANNED_FILTER)
 
@@ -179,7 +187,7 @@ async def handle_user_start(message: Message, state: FSMContext):
 
 @professor_user_router.message(user_states.Ai.activate_code)
 async def handle_activate_code(message: Message, state: FSMContext):
-    code = (message.text or "").strip()
+    code = _normalize_order_code_input(message.text)
     if not code: return await message.answer("Введите номер заказа.")
     used_code = await webapp_client.get_used_code_by_code(code)
 
