@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 from typing import Any
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Message, BufferedInputFile, InputMediaPhoto, InputMediaDocument, ReplyKeyboardRemove, InlineKeyboardButton, InlineQueryResultArticle, InputTextMessageContent
@@ -129,38 +128,38 @@ class ProfessorBot(Bot):
         return conversation_id
 
     async def _reply_text_safe(self, message: Message, text: str, *, reply_markup=None) -> Message:
-        try: return await message.reply(text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+        try: return await message.reply(text, parse_mode=None, reply_markup=reply_markup)
         except TelegramBadRequest as e:
-            self.__logger.warning("Markdown failed for text reply, retrying plain. err=%s", e)
-            return await message.reply(text, reply_markup=reply_markup)
+            self.__logger.warning("Plain text reply failed, retrying plain. err=%s", e)
+            return await message.reply(text, parse_mode=None, reply_markup=reply_markup)
 
     async def _reply_photo_safe(self, message: Message, photo: BufferedInputFile, *, caption: str | None, reply_markup=None):
-        try: return await message.reply_photo(photo, caption=caption, parse_mode=ParseMode.MARKDOWN if caption else None, reply_markup=reply_markup)
+        try: return await message.reply_photo(photo, caption=caption, parse_mode=None, reply_markup=reply_markup)
         except TelegramBadRequest as e:
-            self.__logger.warning("Markdown failed for photo caption, retrying plain. err=%s", e)
-            return await message.reply_photo(photo, caption=caption, reply_markup=reply_markup)
+            self.__logger.warning("Plain photo caption failed, retrying plain. err=%s", e)
+            return await message.reply_photo(photo, caption=caption, parse_mode=None, reply_markup=reply_markup)
 
     async def _reply_document_safe(self, message: Message, document: BufferedInputFile, *, caption: str | None, reply_markup=None):
-        try: return await message.reply_document(document, caption=caption, parse_mode=ParseMode.MARKDOWN if caption else None, reply_markup=reply_markup)
+        try: return await message.reply_document(document, caption=caption, parse_mode=None, reply_markup=reply_markup)
         except TelegramBadRequest as e:
-            self.__logger.warning("Markdown failed for document caption, retrying plain. err=%s", e)
-            return await message.reply_document(document, caption=caption, reply_markup=reply_markup)
+            self.__logger.warning("Plain document caption failed, retrying plain. err=%s", e)
+            return await message.reply_document(document, caption=caption, parse_mode=None, reply_markup=reply_markup)
 
     async def _reply_media_group_safe(self, message: Message, files: list[tuple[str, bytes]], *, caption: str | None = None):
-        media_md = [InputMediaPhoto(media=BufferedInputFile(file=content, filename=name), parse_mode=ParseMode.MARKDOWN) for name, content in files]
+        media_md = [InputMediaPhoto(media=BufferedInputFile(file=content, filename=name), parse_mode=None) for name, content in files]
         if caption: media_md[0].caption = caption
         try: return await message.reply_media_group(media_md)
-        except TelegramBadRequest as e: self.__logger.warning("Markdown failed for media group, retrying plain. err=%s", e)
-        media_plain = [InputMediaPhoto(media=BufferedInputFile(file=content, filename=name)) for name, content in files]
+        except TelegramBadRequest as e: self.__logger.warning("Plain media group failed, retrying plain. err=%s", e)
+        media_plain = [InputMediaPhoto(media=BufferedInputFile(file=content, filename=name), parse_mode=None) for name, content in files]
         if caption: media_plain[0].caption = caption
         return await message.reply_media_group(media_plain)
 
     async def _reply_document_group_safe(self, message: Message, files: list[tuple[str, bytes]], *, caption: str | None = None):
-        media_md = [InputMediaDocument(media=BufferedInputFile(file=content, filename=name), parse_mode=ParseMode.MARKDOWN) for name, content in files]
+        media_md = [InputMediaDocument(media=BufferedInputFile(file=content, filename=name), parse_mode=None) for name, content in files]
         if caption: media_md[0].caption = caption
         try: return await message.reply_media_group(media_md)
-        except TelegramBadRequest as e: self.__logger.warning("Markdown failed for document group, retrying plain. err=%s", e)
-        media_plain = [InputMediaDocument(media=BufferedInputFile(file=content, filename=name)) for name, content in files]
+        except TelegramBadRequest as e: self.__logger.warning("Plain document group failed, retrying plain. err=%s", e)
+        media_plain = [InputMediaDocument(media=BufferedInputFile(file=content, filename=name), parse_mode=None) for name, content in files]
         if caption: media_plain[0].caption = caption
         return await message.reply_media_group(media_plain)
 
@@ -321,18 +320,19 @@ class ProfessorBot(Bot):
                     title="Ответ",
                     input_message_content=InputTextMessageContent(
                         message_text=clean_text,
-                        parse_mode=ParseMode.MARKDOWN,
+                        parse_mode=None,
                     ),
                 )
             )
         except TelegramBadRequest as e:
-            self.__logger.warning("Markdown failed for guest response, retrying plain. err=%s", e)
+            self.__logger.warning("Plain guest response failed, retrying plain. err=%s", e)
             return await message.answer_guest_query(
                 result=InlineQueryResultArticle(
                     id=f"guest:{message.message_id}",
                     title="Ответ",
                     input_message_content=InputTextMessageContent(
                         message_text=clean_text,
+                        parse_mode=None,
                     ),
                 ),
             )
