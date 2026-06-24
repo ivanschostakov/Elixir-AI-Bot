@@ -3,9 +3,11 @@ import csv
 import os
 import pandas as pd
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, date, timedelta
+from html import escape
 from tempfile import TemporaryDirectory
+from urllib.parse import urlparse
 from aiogram import Router
 from aiogram.enums import ChatType
 from aiogram.filters import CommandStart, Command
@@ -31,6 +33,7 @@ dose_admin_router.message.filter(lambda message: message.from_user.id in ADMIN_T
 dose_admin_router.callback_query.filter(lambda call: call.data.startswith("admin") and call.from_user.id in ADMIN_TG_IDS and call.message.chat.type == ChatType.PRIVATE)
 
 SEND_BROADCAST_DELAY_SEC = 0.2
+MAX_SEND_INLINE_BUTTONS = 100
 active_send_broadcasts: dict[int, asyncio.Event] = {}
 pending_send_confirmations: dict[int, "PendingSendConfirmation"] = {}
 
@@ -39,8 +42,108 @@ pending_send_confirmations: dict[int, "PendingSendConfirmation"] = {}
 class PendingSendConfirmation:
     admin_id: int
     text: str
+    buttons: list[tuple[str, str]] = field(default_factory=list)
+    stage: str = "buttons"
     step: int = 1
     message_id: int | None = None
+
+
+def _normalize_send_button_url(raw_url: str) -> str:
+    url = raw_url.strip()
+    if url.startswith("www.") or url.startswith("t.me/"):
+        url = f"https://{url}"
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("button URL must start with http:// or https://")
+    return url
+
+
+def _parse_send_button(raw_text: str) -> tuple[str, str]:
+    if "," not in raw_text:
+        raise ValueError("button must be in 'name,url' format")
+    button_text, raw_url = raw_text.split(",", 1)
+    button_text = button_text.strip()
+    if not button_text:
+        raise ValueError("button name is required")
+    return button_text, _normalize_send_button_url(raw_url)
+
+
+def _format_buttons_list(buttons: list[tuple[str, str]], *, limit: int = 10) -> list[str]:
+    if not buttons:
+        return ["Кнопки пока не добавлены."]
+    visible = buttons[-limit:]
+    lines: list[str] = []
+    if len(buttons) > limit:
+        lines.append(f"... и еще {len(buttons) - limit}")
+    start_index = len(buttons) - len(visible) + 1
+    for index, (button_text, url) in enumerate(visible, start=start_index):
+        lines.append(f"{index}. {escape(button_text)} — <code>{escape(url)}</code>")
+    return lines
+
+
+def _format_send_buttons_prompt(pending: PendingSendConfirmation) -> str:
+    lines = [
+        "<b>Кнопки для рассылки</b>",
+        f"Добавлено: <b>{len(pending.buttons)}/{MAX_SEND_INLINE_BUTTONS}</b>",
+        "",
+        *_format_buttons_list(pending.buttons),
+        "",
+    ]
+    if len(pending.buttons) < MAX_SEND_INLINE_BUTTONS:
+        lines.extend([
+            "Отправьте кнопку сообщением в формате:",
+            "<code>Название кнопки,https://example.com</code>",
+            "",
+            "Каждая кнопка будет отдельной строкой под сообщением.",
+        ])
+    else:
+        lines.append("Достигнут лимит Telegram для inline-клавиатуры. Нажмите <b>Дальше</b>.")
+    return "\n".join(lines)
+
+
+def _format_send_confirmation_text(pending: PendingSendConfirmation, step: int) -> str:
+    preview = pending.text if len(pending.text) <= 700 else f"{pending.text[:700]}..."
+    lines = [
+        f"Подтверждение рассылки <b>{step}/2</b>.",
+        f"Кнопок: <b>{len(pending.buttons)}</b>",
+        "",
+        "<b>Текст:</b>",
+        escape(preview),
+    ]
+    if pending.buttons:
+        lines.extend(["", "<b>Кнопки:</b>", *_format_buttons_list(pending.buttons, limit=5)])
+    lines.extend(["", "Нажмите кнопку ниже, чтобы продолжить запуск."])
+    return "\n".join(lines)
+
+
+def _is_send_button_input(message: Message) -> bool:
+    if not (message.text and message.from_user):
+        return False
+    if message.text.strip().startswith("/"):
+        return False
+    pending = pending_send_confirmations.get(message.bot.id)
+    return bool(pending and pending.admin_id == message.from_user.id and pending.stage == "buttons")
+
+
+async def _show_send_buttons_prompt(message: Message, pending: PendingSendConfirmation):
+    sent = await message.answer(
+        _format_send_buttons_prompt(pending),
+        reply_markup=admin_keyboards.send_buttons_builder(has_buttons=bool(pending.buttons)),
+    )
+    pending.message_id = sent.message_id
+
+
+async def _show_send_confirmation(message: Message, pending: PendingSendConfirmation, *, edit: bool = False):
+    pending.stage = "confirm"
+    pending.step = 1
+    text = _format_send_confirmation_text(pending, 1)
+    if edit:
+        await message.edit_text(text, reply_markup=admin_keyboards.send_confirm(1))
+        pending.message_id = message.message_id
+        return
+    sent = await message.answer(text, reply_markup=admin_keyboards.send_confirm(1))
+    pending.message_id = sent.message_id
+
 
 async def _send_broadcast_result_files(
     message: Message,
@@ -67,10 +170,11 @@ async def _send_broadcast_result_files(
         await message.answer_document(FSInputFile(error_path), caption="error.csv")
 
 
-async def _run_send_broadcast(message: Message, text: str):
+async def _run_send_broadcast(message: Message, text: str, buttons: list[tuple[str, str]] | None = None):
     if message.bot.id in active_send_broadcasts: return await message.answer("Рассылка уже выполняется. Для остановки отправьте <code>/stop_send</code>")
 
     users = await webapp_client.get_users()
+    reply_markup = admin_keyboards.send_broadcast_buttons(buttons or [])
     stop_event = asyncio.Event()
     active_send_broadcasts[message.bot.id] = stop_event
     await message.answer("рассылка успешно запущена", reply_markup=admin_keyboards.send_cancel)
@@ -85,7 +189,7 @@ async def _run_send_broadcast(message: Message, text: str):
 
             try:
                 await message.bot.get_chat(user.tg_id)
-                sent_message = await message.bot.send_message(user.tg_id, text)
+                sent_message = await message.bot.send_message(user.tg_id, text, reply_markup=reply_markup)
                 success_rows.append((user.tg_id, sent_message.message_id))
             except Exception as exc:
                 reason = str(exc).strip() or exc.__class__.__name__
@@ -125,7 +229,7 @@ async def _handle_send_confirm_callback(call: CallbackQuery):
     if action == "1":
         pending.step = 2
         await call.answer("Подтверждение 1/2 принято")
-        return await call.message.edit_text("Подтверждение рассылки 2/2. Нажмите кнопку еще раз для запуска.", reply_markup=admin_keyboards.send_confirm(2))
+        return await call.message.edit_text(_format_send_confirmation_text(pending, 2), reply_markup=admin_keyboards.send_confirm(2))
 
     if action == "2":
         if pending.step != 2: return await call.answer("Сначала нажмите подтверждение 1/2", show_alert=True)
@@ -133,9 +237,27 @@ async def _handle_send_confirm_callback(call: CallbackQuery):
         await call.answer("Запускаю рассылку")
         try: await call.message.edit_reply_markup(reply_markup=None)
         except Exception: pass
-        return await _run_send_broadcast(call.message, pending.text)
+        return await _run_send_broadcast(call.message, pending.text, pending.buttons)
 
     return await call.answer("Некорректное подтверждение")
+
+
+async def _handle_send_buttons_callback(call: CallbackQuery):
+    payload = (call.data or "").split(":")
+    if len(payload) < 4: return await call.answer("Некорректное действие")
+    action = payload[3]
+    bot_id = call.message.bot.id
+    pending = pending_send_confirmations.get(bot_id)
+    if not pending: return await call.answer("Нет ожидающей рассылки", show_alert=True)
+    if pending.admin_id != call.from_user.id: return await call.answer("Настраивать кнопки может только администратор, который отправил /send", show_alert=True)
+    if pending.message_id is not None and call.message.message_id != pending.message_id: return await call.answer("Это устаревшее сообщение настройки кнопок", show_alert=True)
+    if pending.stage != "buttons": return await call.answer("Настройка кнопок уже завершена", show_alert=True)
+
+    if action in {"skip", "done"}:
+        await call.answer("Переходим к подтверждению")
+        return await _show_send_confirmation(call.message, pending, edit=True)
+
+    return await call.answer("Некорректное действие")
 
 
 async def _handle_send_cancel_callback(call: CallbackQuery):
@@ -204,13 +326,35 @@ async def handle_send(message: Message):
         pending = pending_send_confirmations.get(message.bot.id)
         if pending and pending.admin_id != message.from_user.id: return await message.answer("Другой администратор уже подтверждает запуск рассылки. Дождитесь завершения подтверждения.")
 
-        pending_send_confirmations[message.bot.id] = PendingSendConfirmation(admin_id=message.from_user.id, text=text, step=1)
-        confirmation_message = await message.answer(
-            "Подтверждение рассылки 1/2. Нажмите кнопку ниже, чтобы продолжить запуск.",
-            reply_markup=admin_keyboards.send_confirm(1)
-        )
-        pending_send_confirmations[message.bot.id].message_id = confirmation_message.message_id
+        pending = PendingSendConfirmation(admin_id=message.from_user.id, text=text)
+        pending_send_confirmations[message.bot.id] = pending
+        await _show_send_buttons_prompt(message, pending)
     else: await message.answer("Ошибка команды: <code>/send тг_айди/all текст</code>")
+
+
+@professor_admin_router.message(_is_send_button_input)
+@dose_admin_router.message(_is_send_button_input)
+@expert_admin_router.message(_is_send_button_input)
+async def handle_send_button_input(message: Message):
+    pending = pending_send_confirmations.get(message.bot.id)
+    if not pending or pending.admin_id != message.from_user.id or pending.stage != "buttons":
+        return
+    if len(pending.buttons) >= MAX_SEND_INLINE_BUTTONS:
+        return await message.answer(
+            "Достигнут лимит Telegram для inline-клавиатуры. Нажмите <b>Дальше</b>.",
+            reply_markup=admin_keyboards.send_buttons_builder(has_buttons=bool(pending.buttons)),
+        )
+
+    try:
+        button_text, url = _parse_send_button(message.text.strip())
+    except Exception:
+        return await message.answer(
+            "Не получилось разобрать кнопку. Отправьте в формате:\n<code>Название кнопки,https://example.com</code>",
+            reply_markup=admin_keyboards.send_buttons_builder(has_buttons=bool(pending.buttons)),
+        )
+
+    pending.buttons.append((button_text, url))
+    await _show_send_buttons_prompt(message, pending)
 
 
 @expert_admin_router.message(CommandStart())
@@ -338,6 +482,7 @@ async def handle_spends_time(message: Message):
     await message.answer_document(FSInputFile(file_path), caption=f"📊 Файл со статистикой расходов <b>{period_label}</b>", parse_mode="HTML", reply_markup=admin_keyboards.main_menu)
     return os.remove(file_path)
 
+@professor_admin_router.callback_query()
 @expert_admin_router.callback_query()
 @dose_admin_router.callback_query()
 async def handle_admin_callback(call: CallbackQuery, state: FSMContext):
@@ -347,6 +492,7 @@ async def handle_admin_callback(call: CallbackQuery, state: FSMContext):
         if len(data) < 2: return
         if data[1] == "cancel": return await _handle_send_cancel_callback(call)
         if data[1] == "confirm": return await _handle_send_confirm_callback(call)
+        if data[1] == "buttons": return await _handle_send_buttons_callback(call)
         return
     if data[0] != "spends": return
     try: await call.answer()

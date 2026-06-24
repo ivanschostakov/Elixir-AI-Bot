@@ -55,6 +55,27 @@ def send_confirm(step: int):
     ])
 
 
+def send_buttons_builder(*, has_buttons: bool):
+    action_button = (
+        InlineKeyboardButton(text="➡️ Дальше", callback_data="admin:send:buttons:done")
+        if has_buttons
+        else InlineKeyboardButton(text="Пропустить кнопки", callback_data="admin:send:buttons:skip")
+    )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [action_button],
+        [InlineKeyboardButton(text="✖️ Отменить запуск", callback_data="admin:send:confirm:cancel")],
+    ])
+
+
+def send_broadcast_buttons(buttons: list[tuple[str, str]]):
+    if not buttons:
+        return None
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=text, url=url)]
+        for text, url in buttons[:100]
+    ])
+
+
 send_cancel = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="⛔️ Остановить рассылку", callback_data="admin:send:cancel")]
 ])
