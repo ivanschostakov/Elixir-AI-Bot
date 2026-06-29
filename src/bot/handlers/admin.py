@@ -46,6 +46,7 @@ class PendingSendConfirmation:
     stage: str = "buttons"
     step: int = 1
     message_id: int | None = None
+    preview_message_id: int | None = None
 
 
 def _normalize_send_button_url(raw_url: str) -> str:
@@ -102,18 +103,62 @@ def _format_send_buttons_prompt(pending: PendingSendConfirmation) -> str:
 
 
 def _format_send_confirmation_text(pending: PendingSendConfirmation, step: int) -> str:
-    preview = pending.text if len(pending.text) <= 700 else f"{pending.text[:700]}..."
     lines = [
         f"Подтверждение рассылки <b>{step}/2</b>.",
         f"Кнопок: <b>{len(pending.buttons)}</b>",
         "",
-        "<b>Текст:</b>",
-        escape(preview),
+        "Сообщение выше — точное превью того, что получит пользователь.",
+        "Нажмите кнопку ниже, чтобы продолжить запуск.",
     ]
-    if pending.buttons:
-        lines.extend(["", "<b>Кнопки:</b>", *_format_buttons_list(pending.buttons, limit=5)])
-    lines.extend(["", "Нажмите кнопку ниже, чтобы продолжить запуск."])
     return "\n".join(lines)
+
+
+async def _delete_pending_message(message: Message, message_id: int | None) -> None:
+    if message_id is None:
+        return
+    try:
+        await message.bot.delete_message(chat_id=message.chat.id, message_id=message_id)
+    except Exception:
+        pass
+
+
+async def _clear_send_preview(message: Message, pending: PendingSendConfirmation) -> None:
+    await _delete_pending_message(message, pending.preview_message_id)
+    pending.preview_message_id = None
+
+
+async def _clear_send_control(message: Message, pending: PendingSendConfirmation) -> None:
+    await _delete_pending_message(message, pending.message_id)
+    pending.message_id = None
+
+
+async def _send_exact_broadcast_preview(message: Message, pending: PendingSendConfirmation) -> bool:
+    try:
+        sent = await message.answer(
+            pending.text,
+            parse_mode="HTML",
+            reply_markup=admin_keyboards.send_broadcast_buttons(pending.buttons),
+        )
+    except Exception as exc:
+        pending_send_confirmations.pop(message.bot.id, None)
+        await message.answer(
+            "Не получилось отрисовать HTML-превью, поэтому рассылка не запущена.\n\n"
+            f"<b>Ошибка Telegram:</b>\n<code>{escape(str(exc))}</code>\n\n"
+            "Исправьте HTML и отправьте <code>/send</code> заново.",
+            parse_mode="HTML",
+        )
+        return False
+    pending.preview_message_id = sent.message_id
+    return True
+
+
+async def _send_preview_with_control(message: Message, pending: PendingSendConfirmation, control_text: str, control_markup) -> None:
+    await _clear_send_preview(message, pending)
+    await _clear_send_control(message, pending)
+    if not await _send_exact_broadcast_preview(message, pending):
+        return
+    sent = await message.answer(control_text, parse_mode="HTML", reply_markup=control_markup)
+    pending.message_id = sent.message_id
 
 
 def _is_send_button_input(message: Message) -> bool:
@@ -126,23 +171,24 @@ def _is_send_button_input(message: Message) -> bool:
 
 
 async def _show_send_buttons_prompt(message: Message, pending: PendingSendConfirmation):
-    sent = await message.answer(
+    pending.stage = "buttons"
+    await _send_preview_with_control(
+        message,
+        pending,
         _format_send_buttons_prompt(pending),
-        reply_markup=admin_keyboards.send_buttons_builder(has_buttons=bool(pending.buttons)),
+        admin_keyboards.send_buttons_builder(has_buttons=bool(pending.buttons)),
     )
-    pending.message_id = sent.message_id
 
 
 async def _show_send_confirmation(message: Message, pending: PendingSendConfirmation, *, edit: bool = False):
     pending.stage = "confirm"
     pending.step = 1
-    text = _format_send_confirmation_text(pending, 1)
-    if edit:
-        await message.edit_text(text, reply_markup=admin_keyboards.send_confirm(1))
-        pending.message_id = message.message_id
-        return
-    sent = await message.answer(text, reply_markup=admin_keyboards.send_confirm(1))
-    pending.message_id = sent.message_id
+    await _send_preview_with_control(
+        message,
+        pending,
+        _format_send_confirmation_text(pending, 1),
+        admin_keyboards.send_confirm(1),
+    )
 
 
 async def _send_broadcast_result_files(
@@ -189,7 +235,7 @@ async def _run_send_broadcast(message: Message, text: str, buttons: list[tuple[s
 
             try:
                 await message.bot.get_chat(user.tg_id)
-                sent_message = await message.bot.send_message(user.tg_id, text, reply_markup=reply_markup)
+                sent_message = await message.bot.send_message(user.tg_id, text, parse_mode="HTML", reply_markup=reply_markup)
                 success_rows.append((user.tg_id, sent_message.message_id))
             except Exception as exc:
                 reason = str(exc).strip() or exc.__class__.__name__
@@ -221,6 +267,7 @@ async def _handle_send_confirm_callback(call: CallbackQuery):
 
     if action == "cancel":
         pending_send_confirmations.pop(bot_id, None)
+        await _clear_send_preview(call.message, pending)
         await call.answer("Запуск рассылки отменен")
         try: await call.message.edit_text("Запуск рассылки отменен")
         except Exception: pass
@@ -229,7 +276,11 @@ async def _handle_send_confirm_callback(call: CallbackQuery):
     if action == "1":
         pending.step = 2
         await call.answer("Подтверждение 1/2 принято")
-        return await call.message.edit_text(_format_send_confirmation_text(pending, 2), reply_markup=admin_keyboards.send_confirm(2))
+        return await call.message.edit_text(
+            _format_send_confirmation_text(pending, 2),
+            parse_mode="HTML",
+            reply_markup=admin_keyboards.send_confirm(2),
+        )
 
     if action == "2":
         if pending.step != 2: return await call.answer("Сначала нажмите подтверждение 1/2", show_alert=True)
