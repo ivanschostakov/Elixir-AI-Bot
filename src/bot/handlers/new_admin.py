@@ -6,9 +6,10 @@ import pandas as pd
 
 from typing import Literal, get_args
 from datetime import date, datetime, timedelta
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, FSInputFile, InlineQuery, InlineQueryResultArticle, InputTextMessageContent
+from aiogram.types import Message, CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, InlineQuery, InlineQueryResultArticle, InputTextMessageContent
 
 from aiogram.utils.deep_linking import create_start_link
 
@@ -23,7 +24,7 @@ from src.bot.handlers.new_admin_helpers import (
     _user_search_results,
 )
 from src.bot.texts import admin_texts
-from .admin import professor_admin_router
+from .admin import professor_admin_router, _normalize_send_button_url
 from src.bot.keyboards import admin_keyboards
 from src.bot.states import admin_states
 from src.ai.helpers import make_excel_safe
@@ -31,12 +32,33 @@ from src.ai.webapp_client import webapp_client
 from src.tg_methods import get_user_id_by_phone, normalize_phone, get_user_id_by_username
 
 admin_logger = logging.getLogger("aiogram.admin")
+EDIT_CHANNEL_USERNAME = "peptide_slim"
+EDIT_CHANNEL_DEFAULT_BUTTON_TEXT = "Магазин"
 _UTM_FUNNEL_MONEY_COLUMNS = {
     "Выручка товаров, ₽",
     "Выручка доставки, ₽",
     "Общая выручка, ₽",
     "Стоимость ИИ, $",
 }
+
+
+def _forwarded_channel_post(message: Message) -> tuple[int, int] | None:
+    origin = message.forward_origin
+    origin_chat = getattr(origin, "chat", None)
+    origin_message_id = getattr(origin, "message_id", None)
+    if origin_chat is None or origin_message_id is None:
+        return None
+    return int(origin_chat.id), int(origin_message_id)
+
+
+def _forwarded_url_button_text(message: Message) -> str:
+    markup = message.reply_markup
+    if markup:
+        for row in markup.inline_keyboard:
+            for button in row:
+                if button.url and button.text.strip():
+                    return button.text.strip()
+    return EDIT_CHANNEL_DEFAULT_BUTTON_TEXT
 
 
 def _parse_date_range_input(text: str) -> tuple[date, date] | None:
@@ -261,6 +283,106 @@ async def handle_start(message: Message, state: FSMContext):
 @professor_admin_router.message(Command('deeplink'))
 async def handle_link(message: Message, state: FSMContext):
     await message.answer(await create_start_link(message.bot, message.text.removeprefix('/deeplink '), encode=True))
+
+
+@professor_admin_router.message(Command("edit"))
+async def handle_edit_channel_markup(message: Message, state: FSMContext):
+    await state.clear()
+    try:
+        channel = await message.bot.get_chat(f"@{EDIT_CHANNEL_USERNAME}")
+    except TelegramBadRequest as exc:
+        admin_logger.warning("Cannot resolve edit channel @%s: %s", EDIT_CHANNEL_USERNAME, exc)
+        return await message.answer(f"Не удалось открыть канал @{EDIT_CHANNEL_USERNAME}.")
+
+    await state.update_data(edit_channel_id=int(channel.id))
+    await state.set_state(admin_states.EditChannelMarkup.waiting_for_forward)
+    await message.answer(f"Перешлите сообщение из канала @{EDIT_CHANNEL_USERNAME}, у которого нужно заменить ссылку кнопки.")
+
+
+@professor_admin_router.message(admin_states.EditChannelMarkup.waiting_for_forward)
+async def handle_edit_channel_forward(message: Message, state: FSMContext):
+    forwarded_post = _forwarded_channel_post(message)
+    if forwarded_post is None:
+        return await message.answer("Это не пересланное сообщение из канала. Перешлите нужный пост еще раз.")
+
+    channel_id, channel_message_id = forwarded_post
+    data = await state.get_data()
+    if channel_id != data.get("edit_channel_id"):
+        return await message.answer(f"Нужен пост именно из канала @{EDIT_CHANNEL_USERNAME}.")
+
+    await state.update_data(
+        edit_channel_message_id=channel_message_id,
+        edit_channel_button_text=_forwarded_url_button_text(message),
+    )
+    await state.set_state(admin_states.EditChannelMarkup.waiting_for_url)
+    await message.answer("Теперь отправьте новую ссылку для кнопки.")
+
+
+@professor_admin_router.message(admin_states.EditChannelMarkup.waiting_for_url)
+async def handle_edit_channel_url(message: Message, state: FSMContext):
+    try:
+        url = _normalize_send_button_url(message.text or "")
+    except ValueError:
+        return await message.answer("Неверная ссылка. Отправьте URL, начинающийся с http://, https://, www. или t.me/.")
+
+    data = await state.get_data()
+    channel_id = data.get("edit_channel_id")
+    channel_message_id = data.get("edit_channel_message_id")
+    if not channel_id or not channel_message_id:
+        await state.clear()
+        return await message.answer("Данные поста потерялись. Запустите /edit еще раз.")
+
+    await state.update_data(edit_channel_url=url)
+    await state.set_state(admin_states.EditChannelMarkup.waiting_for_button_text)
+    current_button_text = data.get("edit_channel_button_text") or EDIT_CHANNEL_DEFAULT_BUTTON_TEXT
+    await message.answer(
+        "Теперь отправьте название кнопки.\n"
+        f"Текущее название: <code>{current_button_text}</code>"
+    )
+
+
+@professor_admin_router.message(admin_states.EditChannelMarkup.waiting_for_button_text)
+async def handle_edit_channel_button_text(message: Message, state: FSMContext):
+    button_text = (message.text or "").strip()
+    if not button_text:
+        return await message.answer("Название кнопки не может быть пустым. Отправьте текст кнопки.")
+    if len(button_text) > 64:
+        return await message.answer("Название слишком длинное. Отправьте не больше 64 символов.")
+
+    data = await state.get_data()
+    channel_id = data.get("edit_channel_id")
+    channel_message_id = data.get("edit_channel_message_id")
+    url = data.get("edit_channel_url")
+    if not channel_id or not channel_message_id or not url:
+        await state.clear()
+        return await message.answer("Данные поста потерялись. Запустите /edit еще раз.")
+
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=button_text, url=url),
+    ]])
+    try:
+        await message.bot.edit_message_reply_markup(
+            chat_id=channel_id,
+            message_id=channel_message_id,
+            reply_markup=reply_markup,
+        )
+    except TelegramBadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            await state.clear()
+            return await message.answer("У этого поста уже установлена такая ссылка.")
+        admin_logger.warning(
+            "Channel markup edit failed | channel_id=%s | message_id=%s | error=%s",
+            channel_id,
+            channel_message_id,
+            exc,
+        )
+        return await message.answer("Telegram не разрешил изменить этот пост. Проверьте пересланное сообщение и попробуйте снова.")
+    except TelegramForbiddenError as exc:
+        admin_logger.warning("Channel markup edit forbidden | channel_id=%s | error=%s", channel_id, exc)
+        return await message.answer("У бота нет права редактировать сообщения этого канала.")
+
+    await state.clear()
+    await message.answer(f"Готово. Ссылка кнопки в посте обновлена:\n{url}")
 
 
 @professor_admin_router.message(Command('edit_and_pin'), lambda message: message.reply_to_message)

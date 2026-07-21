@@ -7,3 +7,9 @@ class MainMenu(StatesGroup):
 
 class ViewUser(StatesGroup):
     block_days = State()
+
+
+class EditChannelMarkup(StatesGroup):
+    waiting_for_forward = State()
+    waiting_for_url = State()
+    waiting_for_button_text = State()
