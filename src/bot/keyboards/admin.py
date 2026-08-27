@@ -67,6 +67,21 @@ def send_buttons_builder(*, has_buttons: bool):
     ])
 
 
+def send_media_builder(*, has_photos: bool, is_full: bool = False):
+    if has_photos:
+        text = "➡️ Достаточно фото"
+        callback_data = "admin:send:media:done"
+    else:
+        text = "Пропустить фото"
+        callback_data = "admin:send:media:skip"
+    if is_full:
+        text = "➡️ Дальше"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=text, callback_data=callback_data)],
+        [InlineKeyboardButton(text="✖️ Отменить запуск", callback_data="admin:send:confirm:cancel")],
+    ])
+
+
 def send_broadcast_buttons(buttons: list[tuple[str, str]]):
     if not buttons:
         return None

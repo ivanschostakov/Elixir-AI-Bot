@@ -12,11 +12,21 @@ from aiogram import Router
 from aiogram.enums import ChatType
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, FSInputFile
+from aiogram.types import Message, CallbackQuery, FSInputFile, InputMediaPhoto
 
 from config import ADMIN_TG_IDS, SPENDS_DIR, EXPERT_BOT_TOKEN, DOSE_BOT_TOKEN, UFA_TZ
 from src.bot.keyboards import admin_keyboards
 from src.bot.states import admin_states
+from src.bot.broadcast_limits import (
+    MAX_BROADCAST_CAPTION_LENGTH,
+    MAX_BROADCAST_PHOTOS,
+    MAX_BROADCAST_TEXT_LENGTH,
+    MAX_INLINE_BUTTONS,
+    MAX_INLINE_BUTTON_TEXT_LENGTH,
+    MAX_INLINE_BUTTON_URL_LENGTH,
+    telegram_text_length,
+)
+from src.bot.handlers.ai_helpers import MediaGroupFilter, media_group_handler
 from src.ai.webapp_client import webapp_client
 from src.tg_methods import get_user_id_by_phone, normalize_phone
 
@@ -33,7 +43,8 @@ dose_admin_router.message.filter(lambda message: message.from_user.id in ADMIN_T
 dose_admin_router.callback_query.filter(lambda call: call.data.startswith("admin") and call.from_user.id in ADMIN_TG_IDS and call.message.chat.type == ChatType.PRIVATE)
 
 SEND_BROADCAST_DELAY_SEC = 0.2
-MAX_SEND_INLINE_BUTTONS = 100
+MAX_SEND_INLINE_BUTTONS = MAX_INLINE_BUTTONS
+ALBUM_BUTTON_PLACEHOLDER = "\u2063"
 active_send_broadcasts: dict[int, asyncio.Event] = {}
 pending_send_confirmations: dict[int, "PendingSendConfirmation"] = {}
 
@@ -43,10 +54,11 @@ class PendingSendConfirmation:
     admin_id: int
     text: str
     buttons: list[tuple[str, str]] = field(default_factory=list)
-    stage: str = "buttons"
+    photo_file_ids: list[str] = field(default_factory=list)
+    stage: str = "media"
     step: int = 1
     message_id: int | None = None
-    preview_message_id: int | None = None
+    preview_message_ids: list[int] = field(default_factory=list)
 
 
 def _normalize_send_button_url(raw_url: str) -> str:
@@ -66,7 +78,12 @@ def _parse_send_button(raw_text: str) -> tuple[str, str]:
     button_text = button_text.strip()
     if not button_text:
         raise ValueError("button name is required")
-    return button_text, _normalize_send_button_url(raw_url)
+    if telegram_text_length(button_text) > MAX_INLINE_BUTTON_TEXT_LENGTH:
+        raise ValueError(f"button name is longer than {MAX_INLINE_BUTTON_TEXT_LENGTH} characters")
+    url = _normalize_send_button_url(raw_url)
+    if len(url) > MAX_INLINE_BUTTON_URL_LENGTH:
+        raise ValueError(f"button URL is longer than {MAX_INLINE_BUTTON_URL_LENGTH} characters")
+    return button_text, url
 
 
 def _format_buttons_list(buttons: list[tuple[str, str]], *, limit: int = 10) -> list[str]:
@@ -95,6 +112,7 @@ def _format_send_buttons_prompt(pending: PendingSendConfirmation) -> str:
             "Отправьте кнопку сообщением в формате:",
             "<code>Название кнопки,https://example.com</code>",
             "",
+            f"Название: до {MAX_INLINE_BUTTON_TEXT_LENGTH} символов. URL: до {MAX_INLINE_BUTTON_URL_LENGTH} символов.",
             "Каждая кнопка будет отдельной строкой под сообщением.",
         ])
     else:
@@ -102,9 +120,28 @@ def _format_send_buttons_prompt(pending: PendingSendConfirmation) -> str:
     return "\n".join(lines)
 
 
+def _format_send_media_prompt(pending: PendingSendConfirmation) -> str:
+    text_length = telegram_text_length(pending.text)
+    lines = [
+        "<b>Фото для рассылки</b>",
+        f"Добавлено: <b>{len(pending.photo_file_ids)}/{MAX_BROADCAST_PHOTOS}</b>",
+        f"Длина текста: <b>{text_length}/{MAX_BROADCAST_CAPTION_LENGTH}</b> для подписи под фото",
+        "",
+    ]
+    if len(pending.photo_file_ids) < MAX_BROADCAST_PHOTOS:
+        lines.extend([
+            "Отправляйте фотографии по одной или альбомами.",
+            "Можно добавлять их поэтапно, пока не нажмёте <b>Достаточно фото</b>.",
+        ])
+    else:
+        lines.append("Достигнут лимит Telegram: 10 фотографий. Нажмите <b>Дальше</b>.")
+    return "\n".join(lines)
+
+
 def _format_send_confirmation_text(pending: PendingSendConfirmation, step: int) -> str:
     lines = [
         f"Подтверждение рассылки <b>{step}/2</b>.",
+        f"Фото: <b>{len(pending.photo_file_ids)}</b>",
         f"Кнопок: <b>{len(pending.buttons)}</b>",
         "",
         "Сообщение выше — точное превью того, что получит пользователь.",
@@ -123,8 +160,9 @@ async def _delete_pending_message(message: Message, message_id: int | None) -> N
 
 
 async def _clear_send_preview(message: Message, pending: PendingSendConfirmation) -> None:
-    await _delete_pending_message(message, pending.preview_message_id)
-    pending.preview_message_id = None
+    for message_id in pending.preview_message_ids:
+        await _delete_pending_message(message, message_id)
+    pending.preview_message_ids.clear()
 
 
 async def _clear_send_control(message: Message, pending: PendingSendConfirmation) -> None:
@@ -132,13 +170,40 @@ async def _clear_send_control(message: Message, pending: PendingSendConfirmation
     pending.message_id = None
 
 
+async def _send_broadcast_payload(bot, chat_id: int, pending: PendingSendConfirmation) -> list[Message]:
+    reply_markup = admin_keyboards.send_broadcast_buttons(pending.buttons)
+    if not pending.photo_file_ids:
+        sent = await bot.send_message(chat_id, pending.text, parse_mode="HTML", reply_markup=reply_markup)
+        return [sent]
+
+    if len(pending.photo_file_ids) == 1:
+        sent = await bot.send_photo(
+            chat_id,
+            pending.photo_file_ids[0],
+            caption=pending.text,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+        return [sent]
+
+    media = [
+        InputMediaPhoto(
+            media=file_id,
+            caption=pending.text if index == 0 else None,
+            parse_mode="HTML" if index == 0 else None,
+        )
+        for index, file_id in enumerate(pending.photo_file_ids)
+    ]
+    sent_messages = list(await bot.send_media_group(chat_id, media=media))
+    if reply_markup is not None:
+        button_message = await bot.send_message(chat_id, ALBUM_BUTTON_PLACEHOLDER, reply_markup=reply_markup)
+        sent_messages.append(button_message)
+    return sent_messages
+
+
 async def _send_exact_broadcast_preview(message: Message, pending: PendingSendConfirmation) -> bool:
     try:
-        sent = await message.answer(
-            pending.text,
-            parse_mode="HTML",
-            reply_markup=admin_keyboards.send_broadcast_buttons(pending.buttons),
-        )
+        sent_messages = await _send_broadcast_payload(message.bot, message.chat.id, pending)
     except Exception as exc:
         pending_send_confirmations.pop(message.bot.id, None)
         await message.answer(
@@ -148,7 +213,7 @@ async def _send_exact_broadcast_preview(message: Message, pending: PendingSendCo
             parse_mode="HTML",
         )
         return False
-    pending.preview_message_id = sent.message_id
+    pending.preview_message_ids = [sent.message_id for sent in sent_messages]
     return True
 
 
@@ -170,6 +235,35 @@ def _is_send_button_input(message: Message) -> bool:
     return bool(pending and pending.admin_id == message.from_user.id and pending.stage == "buttons")
 
 
+def _is_send_media_input(message: Message) -> bool:
+    if not message.from_user or message.media_group_id:
+        return False
+    if message.text and message.text.strip().startswith("/"):
+        return False
+    pending = pending_send_confirmations.get(message.bot.id)
+    return bool(pending and pending.admin_id == message.from_user.id and pending.stage == "media")
+
+
+def _is_send_media_group_input(message: Message) -> bool:
+    if not message.from_user or not message.media_group_id:
+        return False
+    pending = pending_send_confirmations.get(message.bot.id)
+    return bool(pending and pending.admin_id == message.from_user.id and pending.stage == "media")
+
+
+async def _show_send_media_prompt(message: Message, pending: PendingSendConfirmation):
+    pending.stage = "media"
+    await _send_preview_with_control(
+        message,
+        pending,
+        _format_send_media_prompt(pending),
+        admin_keyboards.send_media_builder(
+            has_photos=bool(pending.photo_file_ids),
+            is_full=len(pending.photo_file_ids) >= MAX_BROADCAST_PHOTOS,
+        ),
+    )
+
+
 async def _show_send_buttons_prompt(message: Message, pending: PendingSendConfirmation):
     pending.stage = "buttons"
     await _send_preview_with_control(
@@ -178,6 +272,27 @@ async def _show_send_buttons_prompt(message: Message, pending: PendingSendConfir
         _format_send_buttons_prompt(pending),
         admin_keyboards.send_buttons_builder(has_buttons=bool(pending.buttons)),
     )
+
+
+async def _add_send_photos(message: Message, pending: PendingSendConfirmation, messages: list[Message]) -> None:
+    if telegram_text_length(pending.text) > MAX_BROADCAST_CAPTION_LENGTH:
+        await message.answer(
+            f"Текст содержит больше {MAX_BROADCAST_CAPTION_LENGTH} символов и не помещается в подпись к фото. "
+            "Запустите <code>/send</code> заново с более коротким текстом или пропустите фото.",
+            reply_markup=admin_keyboards.send_media_builder(has_photos=bool(pending.photo_file_ids)),
+        )
+        return
+
+    photo_ids = [item.photo[-1].file_id for item in sorted(messages, key=lambda item: item.message_id) if item.photo]
+    if not photo_ids:
+        await message.answer("На этом шаге поддерживаются только фотографии.")
+        return
+
+    remaining = MAX_BROADCAST_PHOTOS - len(pending.photo_file_ids)
+    pending.photo_file_ids.extend(photo_ids[:remaining])
+    if len(photo_ids) > remaining:
+        await message.answer(f"Добавлены первые {remaining} фото: общий лимит Telegram — {MAX_BROADCAST_PHOTOS}.")
+    await _show_send_media_prompt(message, pending)
 
 
 async def _show_send_confirmation(message: Message, pending: PendingSendConfirmation, *, edit: bool = False):
@@ -216,11 +331,10 @@ async def _send_broadcast_result_files(
         await message.answer_document(FSInputFile(error_path), caption="error.csv")
 
 
-async def _run_send_broadcast(message: Message, text: str, buttons: list[tuple[str, str]] | None = None):
+async def _run_send_broadcast(message: Message, pending: PendingSendConfirmation):
     if message.bot.id in active_send_broadcasts: return await message.answer("Рассылка уже выполняется. Для остановки отправьте <code>/stop_send</code>")
 
     users = await webapp_client.get_users()
-    reply_markup = admin_keyboards.send_broadcast_buttons(buttons or [])
     stop_event = asyncio.Event()
     active_send_broadcasts[message.bot.id] = stop_event
     await message.answer("рассылка успешно запущена", reply_markup=admin_keyboards.send_cancel)
@@ -235,14 +349,16 @@ async def _run_send_broadcast(message: Message, text: str, buttons: list[tuple[s
 
             try:
                 await message.bot.get_chat(user.tg_id)
-                sent_message = await message.bot.send_message(user.tg_id, text, parse_mode="HTML", reply_markup=reply_markup)
-                success_rows.append((user.tg_id, sent_message.message_id))
+                sent_messages = await _send_broadcast_payload(message.bot, user.tg_id, pending)
+                success_rows.append((user.tg_id, sent_messages[0].message_id))
             except Exception as exc:
                 reason = str(exc).strip() or exc.__class__.__name__
                 error_rows.append((user.tg_id, reason))
 
             if n < len(users) - 1:
-                try: await asyncio.wait_for(stop_event.wait(), timeout=SEND_BROADCAST_DELAY_SEC)
+                payload_message_count = max(1, len(pending.photo_file_ids)) + (1 if len(pending.photo_file_ids) > 1 and pending.buttons else 0)
+                delay = max(SEND_BROADCAST_DELAY_SEC, payload_message_count / 20)
+                try: await asyncio.wait_for(stop_event.wait(), timeout=delay)
                 except asyncio.TimeoutError: pass
 
         status_text = (
@@ -288,7 +404,7 @@ async def _handle_send_confirm_callback(call: CallbackQuery):
         await call.answer("Запускаю рассылку")
         try: await call.message.edit_reply_markup(reply_markup=None)
         except Exception: pass
-        return await _run_send_broadcast(call.message, pending.text, pending.buttons)
+        return await _run_send_broadcast(call.message, pending)
 
     return await call.answer("Некорректное подтверждение")
 
@@ -309,6 +425,29 @@ async def _handle_send_buttons_callback(call: CallbackQuery):
         return await _show_send_confirmation(call.message, pending, edit=True)
 
     return await call.answer("Некорректное действие")
+
+
+async def _handle_send_media_callback(call: CallbackQuery):
+    payload = (call.data or "").split(":")
+    if len(payload) < 4:
+        return await call.answer("Некорректное действие")
+    action = payload[3]
+    pending = pending_send_confirmations.get(call.message.bot.id)
+    if not pending:
+        return await call.answer("Нет ожидающей рассылки", show_alert=True)
+    if pending.admin_id != call.from_user.id:
+        return await call.answer("Настраивать фото может только администратор, который отправил /send", show_alert=True)
+    if pending.message_id is not None and call.message.message_id != pending.message_id:
+        return await call.answer("Это устаревшее сообщение настройки фото", show_alert=True)
+    if pending.stage != "media":
+        return await call.answer("Настройка фото уже завершена", show_alert=True)
+    if action == "done" and not pending.photo_file_ids:
+        return await call.answer("Сначала добавьте фото или нажмите «Пропустить фото»", show_alert=True)
+    if action not in {"skip", "done"}:
+        return await call.answer("Некорректное действие")
+
+    await call.answer("Переходим к кнопкам")
+    return await _show_send_buttons_prompt(call.message, pending)
 
 
 async def _handle_send_cancel_callback(call: CallbackQuery):
@@ -377,10 +516,46 @@ async def handle_send(message: Message):
         pending = pending_send_confirmations.get(message.bot.id)
         if pending and pending.admin_id != message.from_user.id: return await message.answer("Другой администратор уже подтверждает запуск рассылки. Дождитесь завершения подтверждения.")
 
+        text_length = telegram_text_length(text)
+        if text_length > MAX_BROADCAST_TEXT_LENGTH:
+            return await message.answer(
+                f"Текст слишком длинный: <b>{text_length}/{MAX_BROADCAST_TEXT_LENGTH}</b> символов. "
+                "Сократите его и отправьте <code>/send</code> заново."
+            )
+
         pending = PendingSendConfirmation(admin_id=message.from_user.id, text=text)
         pending_send_confirmations[message.bot.id] = pending
-        await _show_send_buttons_prompt(message, pending)
+        await _show_send_media_prompt(message, pending)
     else: await message.answer("Ошибка команды: <code>/send тг_айди/all текст</code>")
+
+
+@professor_admin_router.message(MediaGroupFilter(), _is_send_media_group_input)
+@dose_admin_router.message(MediaGroupFilter(), _is_send_media_group_input)
+@expert_admin_router.message(MediaGroupFilter(), _is_send_media_group_input)
+@media_group_handler(only_album=True)
+async def handle_send_media_group_input(messages: list[Message]):
+    if not messages:
+        return
+    message = messages[0]
+    pending = pending_send_confirmations.get(message.bot.id)
+    if not pending or pending.admin_id != message.from_user.id or pending.stage != "media":
+        return
+    await _add_send_photos(message, pending, messages)
+
+
+@professor_admin_router.message(_is_send_media_input)
+@dose_admin_router.message(_is_send_media_input)
+@expert_admin_router.message(_is_send_media_input)
+async def handle_send_media_input(message: Message):
+    pending = pending_send_confirmations.get(message.bot.id)
+    if not pending or pending.admin_id != message.from_user.id or pending.stage != "media":
+        return
+    if not message.photo:
+        return await message.answer(
+            "Отправьте фотографию или альбом. Когда закончите, нажмите кнопку ниже.",
+            reply_markup=admin_keyboards.send_media_builder(has_photos=bool(pending.photo_file_ids)),
+        )
+    await _add_send_photos(message, pending, [message])
 
 
 @professor_admin_router.message(_is_send_button_input)
@@ -398,9 +573,11 @@ async def handle_send_button_input(message: Message):
 
     try:
         button_text, url = _parse_send_button(message.text.strip())
-    except Exception:
+    except ValueError as exc:
         return await message.answer(
-            "Не получилось разобрать кнопку. Отправьте в формате:\n<code>Название кнопки,https://example.com</code>",
+            "Не получилось разобрать кнопку.\n"
+            f"<b>Причина:</b> {escape(str(exc))}\n\n"
+            "Отправьте в формате:\n<code>Название кнопки,https://example.com</code>",
             reply_markup=admin_keyboards.send_buttons_builder(has_buttons=bool(pending.buttons)),
         )
 
@@ -543,6 +720,7 @@ async def handle_admin_callback(call: CallbackQuery, state: FSMContext):
         if len(data) < 2: return
         if data[1] == "cancel": return await _handle_send_cancel_callback(call)
         if data[1] == "confirm": return await _handle_send_confirm_callback(call)
+        if data[1] == "media": return await _handle_send_media_callback(call)
         if data[1] == "buttons": return await _handle_send_buttons_callback(call)
         return
     if data[0] != "spends": return
