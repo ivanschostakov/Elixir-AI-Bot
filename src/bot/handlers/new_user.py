@@ -2,7 +2,6 @@ import base64
 import asyncio
 import httpx
 import logging
-import re
 
 from datetime import datetime, timedelta
 from urllib.parse import parse_qs
@@ -21,6 +20,7 @@ from src.tg_methods import normalize_phone
 from src.bot.texts import user_texts
 from src.bot.keyboards import user_keyboards
 from src.bot.states import user_states
+from src.bot.order_codes import normalize_order_code_input
 from .ai_helpers import (
     MediaGroupFilter,
     media_group_handler,
@@ -40,12 +40,6 @@ professor_user_router = Router(name="shop_professor")
 graph_request_logger = logging.getLogger("aiogram.graph_lifecycle")
 user_flow_logger = logging.getLogger("aiogram.shop_user")
 graph_generation_lock = asyncio.Lock()
-
-def _normalize_order_code_input(value: str | int | None) -> str:
-    code = str(value or "").strip()
-    code = re.sub(r"^\s*заказ\s*", "", code, flags=re.IGNORECASE)
-    code = re.sub(r"^\s*[№#]\s*", "", code)
-    return code.strip()
 
 professor_user_router.message.filter(lambda message: message.from_user.id not in OWNER_TG_IDS and message.chat.type == ChatType.PRIVATE, check_blocked, CHAT_NOT_BANNED_FILTER)
 professor_user_router.callback_query.filter(lambda call: call.data.startswith("user") and call.from_user.id not in OWNER_TG_IDS and call.message.chat.type == ChatType.PRIVATE, check_blocked, CHAT_NOT_BANNED_FILTER)
@@ -187,11 +181,29 @@ async def handle_user_start(message: Message, state: FSMContext):
 
 @professor_user_router.message(user_states.Ai.activate_code)
 async def handle_activate_code(message: Message, state: FSMContext):
-    code = _normalize_order_code_input(message.text)
-    if not code: return await message.answer("Введите номер заказа.")
-    used_code = await webapp_client.get_used_code_by_code(code)
+    code = normalize_order_code_input(message.text)
+    if not code:
+        user_flow_logger.info("Premium activation invalid code format | user_id=%s", message.from_user.id)
+        return await message.answer(
+            "Не удалось распознать номер заказа. Отправьте его в формате <code>08-9VJ90</code> "
+            "или <code>Заказ №08-9VJ90</code>.",
+            reply_markup=user_keyboards.back,
+        )
+
+    user_flow_logger.info("Premium activation code submitted | user_id=%s | code=%s", message.from_user.id, code)
+    try:
+        used_code = await webapp_client.get_used_code_by_code(code)
+    except WebappBotApiError as exc:
+        if exc.status_code == 404:
+            used_code = None
+            user_flow_logger.warning("Used-code lookup returned 404; treating as unused | user_id=%s | code=%s", message.from_user.id, code)
+        else:
+            user_flow_logger.warning("Used-code lookup failed | user_id=%s | code=%s | err=%s", message.from_user.id, code, exc)
+            await message.answer("Сервис проверки заказов временно недоступен. Попробуйте ещё раз позже.")
+            return await handle_user_start(message, state)
 
     if used_code:
+        user_flow_logger.info("Premium activation code already used | user_id=%s | code=%s", message.from_user.id, code)
         await message.answer(f"Номер заказа {code} уже использован")
         return await handle_user_start(message, state)
 
@@ -199,7 +211,7 @@ async def handle_activate_code(message: Message, state: FSMContext):
     except WebappBotApiError as exc:
         if exc.status_code and exc.status_code >= 500: await message.answer("Не удалось проверить заказ (ошибка сервера). Попробуйте позже.")
         else: await message.answer("Не удалось проверить заказ (ошибка сети). Попробуйте позже.")
-        user_flow_logger.warning("Order verification failed for user_id=%s code=%s err=%s", message.from_user.id, code, exc)
+        user_flow_logger.warning("Premium activation order verification failed | user_id=%s | code=%s | err=%s", message.from_user.id, code, exc)
         return await handle_user_start(message, state)
 
     price = verification.price
@@ -207,14 +219,17 @@ async def handle_activate_code(message: Message, state: FSMContext):
     verification_code = verification.verification_code
 
     if verification.status == "not_found" or price == "not_found":
+        user_flow_logger.info("Premium activation order not found | user_id=%s | code=%s", message.from_user.id, code)
         await message.answer(f"Заказ не был найден по номеру {code}")
         return await handle_user_start(message, state)
 
     if verification.status == "smtp_failed":
+        user_flow_logger.warning("Premium activation email failed | user_id=%s | code=%s", message.from_user.id, code)
         await message.answer("Заказ найден, но не удалось отправить код подтверждения на почту. Попробуйте позже или обратитесь в поддержку.")
         return await handle_user_start(message, state)
 
     if verification.status == "no_email":
+        user_flow_logger.info("Premium activation order has no email | user_id=%s | code=%s", message.from_user.id, code)
         await message.answer("Заказ найден, но в контакте не указана корректная почта. Обратитесь в поддержку.")
         return await handle_user_start(message, state)
 
@@ -243,6 +258,7 @@ async def handle_activate_code(message: Message, state: FSMContext):
 
     await state.update_data(verification_code=verification_code, add_months=add_months, failed=0, order_code=code, price=int(price), email=email)
     await state.set_state(user_states.Ai.verification_code)
+    user_flow_logger.info("Premium activation OTP sent | user_id=%s | code=%s | months=%s", message.from_user.id, code, add_months)
     return await message.answer(
         f"На вашу почту {email} был отправлен код подтверждения.\n\n"
         "У вас есть 3 попытки, чтобы ввести его правильно. "
@@ -263,14 +279,30 @@ async def handle_verification_code(message: Message, state: FSMContext):
         await handle_user_start(message, state)
 
     elif entered_code == f"{verification_code}":
-        user = await webapp_client.get_user("tg_id", message.from_user.id)
-        premium_until = user.premium_until
-        if not user.premium_until or user.premium_until <= datetime.now(tz=UFA_TZ): premium_until = datetime.now(tz=UFA_TZ) + timedelta(days=add_months * 30)
-        else: premium_until += timedelta(days=add_months * 30)
-        await webapp_client.update_user(message.from_user.id, {"premium_until": premium_until})
-        await webapp_client.create_used_code({"user_id": message.from_user.id, "code": order_code, "price": price})
+        try:
+            redemption = await webapp_client.redeem_premium_order(
+                user_id=message.from_user.id,
+                code=order_code,
+                price=price,
+                months=add_months,
+            )
+        except WebappBotApiError as exc:
+            user_flow_logger.warning("Premium activation redemption failed | user_id=%s | code=%s | err=%s", message.from_user.id, order_code, exc)
+            await message.answer(
+                "Не удалось завершить активацию из-за временной ошибки. "
+                "Отправьте тот же код из письма ещё раз через несколько минут: повторного начисления не будет."
+            )
+            return None
+
         await state.clear()
-        await message.answer(f'Вам успешно начислено {add_months} месяцев безлимита, он теперь действителен до {premium_until.date()}')
+        user_flow_logger.info(
+            "Premium activation completed | user_id=%s | code=%s | months=%s | idempotent=%s",
+            message.from_user.id,
+            order_code,
+            add_months,
+            redemption.already_redeemed,
+        )
+        await message.answer(f'Вам успешно начислено {add_months} месяцев безлимита, он теперь действителен до {redemption.premium_until.date()}')
         await handle_user_start(message, state)
 
     else:

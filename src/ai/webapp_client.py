@@ -93,6 +93,14 @@ class BotUsedCode(BaseModel):
     price: Decimal
 
 
+class BotPremiumRedemption(BaseModel):
+    user_id: int
+    code: str
+    price: Decimal
+    premium_until: datetime
+    already_redeemed: bool = False
+
+
 class BotPromo(BaseModel):
     id: int
     code: str
@@ -574,6 +582,15 @@ class WebappBotClient:
     async def create_used_code(self, data: Any) -> BotUsedCode:
         payload = await self._request_json("POST", "/catalog/used-codes", operation="create_used_code", json_body=data)
         return _model_validate(BotUsedCode, payload, operation="create_used_code")
+
+    async def redeem_premium_order(self, *, user_id: int, code: str, price: int, months: int) -> BotPremiumRedemption:
+        payload = await self._request_json(
+            "POST",
+            "/catalog/used-codes/redeem-premium",
+            operation="redeem_premium_order",
+            json_body={"user_id": user_id, "code": code, "price": price, "months": months},
+        )
+        return _model_validate(BotPremiumRedemption, payload, operation="redeem_premium_order")
 
     async def list_promos(self) -> list[BotPromo]:
         payload = await self._request_json("GET", "/catalog/promos", operation="list_promos")
