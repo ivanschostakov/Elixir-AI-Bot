@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 
 from aiogram import Bot, Dispatcher, Router
 from aiogram.client.default import DefaultBotProperties
@@ -11,7 +12,7 @@ from aiogram.types import (
 )
 
 
-TOKEN = "8496287141:AAEDaHGQTjhvpTQ9dMMcOhhV-sdzp_-qNHU"
+TOKEN = os.getenv("GUEST_TEST_BOT_TOKEN", "")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,6 +72,9 @@ async def normal_message(message: Message):
 
 
 async def main():
+    if not TOKEN:
+        raise RuntimeError("GUEST_TEST_BOT_TOKEN must be set before running this manual test")
+
     log.info("Starting bot")
 
     bot = Bot(

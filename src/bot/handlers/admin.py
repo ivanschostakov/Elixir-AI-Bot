@@ -467,25 +467,6 @@ async def handle_stop_send(message: Message):
     stop_event.set()
     await message.answer("Останавливаю рассылку...")
 
-@professor_admin_router.message(Command("fix"))
-@dose_admin_router.message(Command("fix"))
-@expert_admin_router.message(Command("fix"))
-async def handle_fix(message: Message):
-    users = await webapp_client.get_users()
-    for user in users:
-        if user.tg_id == 896376335:
-            print("break")
-            break
-
-        else:
-            try: await message.bot.send_message(user.tg_id, """Также в новом обновлении используется набор ИИ: Grok, Gemini, Midjourney, Claude.
-
-Мы расширяем возможности ассистента""")
-            except Exception as e: print(e)
-        await asyncio.sleep(1)
-
-
-
 @professor_admin_router.message(Command("send"))
 @dose_admin_router.message(Command("send"))
 @expert_admin_router.message(Command("send"))
