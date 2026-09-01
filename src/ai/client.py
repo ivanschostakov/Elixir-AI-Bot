@@ -24,7 +24,7 @@ class ProfessorClient(AsyncClient):
         resolved_keyword = keyword or BOT_KEYWORDS.get(assistant_id or "", "professor")
         if resolved_keyword not in {"professor", "dose", "new"}: resolved_keyword = "professor"
         self.__keyword = resolved_keyword
-        self.__model = "gpt-5.4" if self.__keyword == "new" else "gpt-5-mini"
+        self.__model = "gpt-5.6-terra" if self.__keyword == "new" else "gpt-5-mini"
         self.__conversation_input_tokens: dict[str, int] = {}
 
     @property
