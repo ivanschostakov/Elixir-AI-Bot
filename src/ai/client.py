@@ -1,3 +1,5 @@
+import json
+from src.ai.telegram_mentor import catalog_context, CATALOG_TOOLS, CATALOG_NAMES, CATALOG_INSTRUCTIONS, PROFILE_TOOL, JOURNAL_TOOLS, memory_instructions, execute_tool, BridgeError
 import base64
 import io
 import logging
@@ -311,7 +313,30 @@ class ProfessorClient(AsyncClient):
     async def _create_v2_response(self, conversation_id: str, input_payload: str | list[dict[str, Any]], response_include: list[str] | None, *, trace_id: str | None = None, stage_name: str = "responses.create") -> Response:
         step_started = time.monotonic()
         self.__logger.info("AI client step | trace=%s | stage=%s.start | conversation_id=%s", trace_id, stage_name, conversation_id)
-        response = await self.responses.create(model=self.__model, input=input_payload, instructions=self.instructions, conversation=ResponseConversationParamParam(id=conversation_id), tools=self._build_tools(), include=response_include, reasoning=self._build_reasoning_payload(), truncation="auto")
+        context = catalog_context.get()
+        tools = self._build_tools() + (CATALOG_TOOLS if context is not None else [])
+        if context is not None and context.get("saved") is not None:
+            tools = [*tools, PROFILE_TOOL, *JOURNAL_TOOLS]
+        instructions = self.instructions + (CATALOG_INSTRUCTIONS + memory_instructions(context) if context is not None else "")
+        response = await self.responses.create(model=self.__model, input=input_payload, instructions=instructions, conversation=ResponseConversationParamParam(id=conversation_id), tools=tools, include=response_include, reasoning=self._build_reasoning_payload(), truncation="auto")
+        if context is not None:
+            for round_index in range(6):
+                calls = [item for item in response.output if getattr(item, "type", None) == "function_call"]
+                if not calls:
+                    break
+                usage = self._extract_v2_usage(response)
+                context["usage"] = [a+b for a,b in zip(context["usage"], usage)]
+                outputs = []
+                for call in calls:
+                    try:
+                        result = await execute_tool(context, call.name, json.loads(call.arguments))
+                    except (ValueError, TypeError, BridgeError):
+                        result = {"ok": False, "error": "tool_failed", "message": "Действие не выполнено. Не утверждай, что профиль сохранён или каталог проверен. При неясных данных уточни один вопрос."}
+                    outputs.append({"type": "function_call_output", "call_id": call.call_id, "output": json.dumps(result, ensure_ascii=False)})
+                response = await self.responses.create(model=self.__model, input=outputs, instructions=instructions,
+                    conversation=ResponseConversationParamParam(id=conversation_id), tools=tools,
+                    tool_choice="none" if round_index == 5 else "auto", include=response_include,
+                    reasoning=self._build_reasoning_payload(), truncation="auto")
         self.__logger.info("AI client step | trace=%s | stage=%s.done | conversation_id=%s | elapsed_ms=%d", trace_id, stage_name, conversation_id, int((time.monotonic() - step_started) * 1000))
         return response
 
@@ -400,12 +425,16 @@ class ProfessorClient(AsyncClient):
         file_count = sum(1 for f in response_files if (f.get("kind") if isinstance(f, dict) else None) == "file")
 
         input_tokens, cached_input_tokens, output_tokens = self._extract_v2_usage(response)
+        final_context_tokens = input_tokens
+        context = catalog_context.get()
+        if context is not None:
+            input_tokens, cached_input_tokens, output_tokens = [a+b for a,b in zip((input_tokens, cached_input_tokens, output_tokens), context["usage"])]
         final_conversation_id = getattr(getattr(response, "conversation", None), "id", None) or active_conversation_id
-        self.__conversation_input_tokens[str(final_conversation_id)] = int(input_tokens)
-        if user_id is not None and int(input_tokens) >= AI_CONVERSATION_SOFT_INPUT_TOKENS:
+        self.__conversation_input_tokens[str(final_conversation_id)] = int(final_context_tokens)
+        if user_id is not None and int(final_context_tokens) >= AI_CONVERSATION_SOFT_INPUT_TOKENS:
             rollover_reason = (
                 "hard_input_limit_post_response"
-                if int(input_tokens) >= AI_CONVERSATION_HARD_INPUT_TOKENS
+                if int(final_context_tokens) >= AI_CONVERSATION_HARD_INPUT_TOKENS
                 else "soft_input_limit_post_response"
             )
             step_started = time.monotonic()

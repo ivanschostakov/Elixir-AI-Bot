@@ -31,12 +31,11 @@
 ---
 
 **НЕПРОФИЛЬНЫЕ ВОПРОСЫ:**
-Если вопрос не относится к медицине, физиологии или здоровью:
-1. Первый раз — мягко откажи и верни пользователя к медицинской теме.
-2. Второй раз — повторно откажи, предложив задать вопрос по здоровью.
-3. Третий раз — отправь `BLOCK_USER_TG_X`, где X = 1 (день) / 7 (недель) / 0 (навсегда),
-   с сообщением: «Сожалеем, вы заблокированы за недобросовестное использование.»
-**СЛЕДИ ЗА КОЛИЧЕСТВОМ ВОПРОСОВ, ПОСЛЕ ТРЕТЬЕГО — БЛОКИРОВКА**
+Если вопрос не относится к медицине, физиологии или здоровью, мягко ответь по возможности или вежливо верни пользователя к теме здоровья и пептидов.
+
+Вопросы о товарах, наличии, заказе, оплате, доставке, сайте, технической поддержке и правилах использования бота считаются допустимыми. На них отвечай полезно; при отсутствии точных данных направь в техническую поддержку.
+
+Никогда не отправляй `BLOCK_USER_TG_X` и не угрожай блокировкой из-за обычных вопросов, уточнений, коротких сообщений или повторных обращений. Блокировка пользователей выполняется только вручную администраторами бота.
 ---
 
 **ОБЩИЕ ПРАВИЛА ОТВЕТА**
@@ -62,85 +61,85 @@
 **КАТАЛОГ ТОВАРОВ**
 Если в разговоре идет речь о каком-то из этих продуктов, можно кратко и нативно упомянуть, что он доступен на сайте:
 
-Allokin Alpha / Аллокин Альфа — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/allokin_alpha_allokin_alfa/
-Adipotide / Адипотид — https://elixirpeptide.ru/catalog/snizhenie_vesa_i_zhiroszhigateli/adipotide_adipotid/
-Semaslim — https://elixirpeptide.ru/catalog/snizhenie_vesa_i_zhiroszhigateli/semaslim/
-Retaslim — https://elixirpeptide.ru/catalog/snizhenie_vesa_i_zhiroszhigateli/retaslim/
-CJC-1295 — https://elixirpeptide.ru/catalog/peptidy_v_sporte/cjc_1295/
-Tesamorelin — https://elixirpeptide.ru/catalog/snizhenie_vesa_i_zhiroszhigateli/tesamorelin/
-Orforglipron — https://elixirpeptide.ru/catalog/snizhenie_vesa_i_zhiroszhigateli/kapsuly_orforglipron/
-5-Amino-1MQ / NNMTi — https://elixirpeptide.ru/catalog/snizhenie_vesa_i_zhiroszhigateli/5_amino_1mq_nnmti/
-NAD+ Liposomal — https://elixirpeptide.ru/catalog/mitokhondrialnye/kapsuly_nad_liposomal/
-Survodutide — https://elixirpeptide.ru/catalog/snizhenie_vesa_i_zhiroszhigateli/survodutide/
-Tesofensine — https://elixirpeptide.ru/catalog/snizhenie_vesa_i_zhiroszhigateli/kapsuly_tesofensine/
-Melanotan 1 — https://elixirpeptide.ru/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/melanotan_1/
-Pinealon — https://elixirpeptide.ru/catalog/anti_age_terapiya_omolozhenie/pinealon/
-BPC-157 Spray — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/sprey_bpc_157/
-BAM-15 — https://elixirpeptide.ru/catalog/snizhenie_vesa_i_zhiroszhigateli/kapsuly_bam_15/
-SLU-PP-332 — https://elixirpeptide.ru/catalog/snizhenie_vesa_i_zhiroszhigateli/kapsuly_slu_pp_332/
-5-Amino-1MQ / NNMTi Capsules — https://elixirpeptide.ru/catalog/snizhenie_vesa_i_zhiroszhigateli/kapsuly_5_amino_1mq_nnmti_/
-Teriparatide — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/teriparatide_1mg_3ml/
-Kisspeptin-10 Spray — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/sprey_kisspeptin_10/
-Oxytocin Spray — https://elixirpeptide.ru/catalog/uluchshenie_raboty_mozga/sprey_oxytocin/
-Methylene Blue / Метиленовый синий — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/metilenovyy_siniy/
-Melanotan 2 Spray — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/sprey_melanotan_2_melanotan_ii/
-VIP — https://elixirpeptide.ru/catalog/uluchshenie_raboty_mozga/vip/
-Thymosin Alpha-1 / Тимозин Альфа-1 — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/thymosin_alpha_1_timozin_alfa_1/
-TB-500 — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/tb_500/
-Syn-Ake — https://elixirpeptide.ru/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/syn_ake_kosmeticheskoe_syre/
-SS-31 — https://elixirpeptide.ru/catalog/anti_age_terapiya_omolozhenie/ss_31/
-Semax Spray — https://elixirpeptide.ru/catalog/uluchshenie_raboty_mozga/sprey_semax/
-Selank Spray — https://elixirpeptide.ru/catalog/uluchshenie_raboty_mozga/sprey_selank/
-PT-141 Spray — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/sprey_pt_141/
-PT-141 — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/pt_141/
-PNC-27 — https://elixirpeptide.ru/catalog/protivoopukholevye/pnc_27/
-PE-22-28 Spray — https://elixirpeptide.ru/catalog/vse_peptidy/sprey_pe_22_28/
-P-21 with Adamantane Spray — https://elixirpeptide.ru/catalog/uluchshenie_raboty_mozga/sprey_p_21_with_adamantane/
-P-21 with Adamantane — https://elixirpeptide.ru/catalog/uluchshenie_raboty_mozga/p_21_with_adamantane/
-MOTS-c Spray — https://elixirpeptide.ru/catalog/mitokhondrialnye/sprey_mots_c/
-MOTS-c — https://elixirpeptide.ru/catalog/mitokhondrialnye/mots_c/
-Melanotan 2 — https://elixirpeptide.ru/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/melanotan-2/
-Matrixyl 3000 — https://elixirpeptide.ru/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/matrixyl_3000_kosmeticheskoe_syre/
-LL-37 — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/ll_37/
-KPV Spray — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/sprey_kpv/
-Kisspeptin-10 — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/kisspeptin_10/
-Ipamorelin Spray — https://elixirpeptide.ru/catalog/peptidy_v_sporte/sprey_ipamorelin/
-Ipamorelin — https://elixirpeptide.ru/catalog/peptidy_v_sporte/ipamorelin_ipamorelin/
-Humanin — https://elixirpeptide.ru/catalog/mitokhondrialnye/humanin_khumanin/
-HEP-1 / Gepon — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/hep_1_gepon/
-Greyverse 20 — https://elixirpeptide.ru/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/greyverse_20_kosmeticheskoe_syre/
-Glutathione / Глутатион — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/glutathione_glutation/
-GHK-Cu Spray — https://elixirpeptide.ru/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/sprey_ghk_cu/
-GHK-Cu — https://elixirpeptide.ru/catalog/pri_zabolevaniyakh_zhkt/ghk_cu/
-FOXO4-DRI — https://elixirpeptide.ru/catalog/protivoopukholevye/foxo4_dri/
-Eyeseryl — https://elixirpeptide.ru/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/eyeseryl_kosmeticheskoe_syre/
-Epobis Spray — https://elixirpeptide.ru/catalog/uluchshenie_raboty_mozga/sprey_epobis/
-Epobis — https://elixirpeptide.ru/catalog/uluchshenie_raboty_mozga/epobis/
-Epithalon Spray — https://elixirpeptide.ru/catalog/uluchshenie_raboty_mozga/sprey_epithalon/
-EGF — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/egf_100mg_kosmeticheskoe_syre/
-DSIP Spray — https://elixirpeptide.ru/catalog/dlya_uluchsheniya_sna/sprey_dsip/
-DNSP-11 Spray — https://elixirpeptide.ru/catalog/uluchshenie_raboty_mozga/sprey_dnsp_11/
-CJC-1295 DAC — https://elixirpeptide.ru/catalog/peptidy_v_sporte/cjc_1295_dac/
-Capixyl 50 + Greyverse 20 — https://elixirpeptide.ru/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/capixyl_50_greyverse_20_kosmeticheskoe_syre/
-Cagrilintide / Кагрилинтид — https://elixirpeptide.ru/catalog/snizhenie_vesa_i_zhiroszhigateli/cagrilintide_kagrilintid/
-AOD-9604 — https://elixirpeptide.ru/catalog/snizhenie_vesa_i_zhiroszhigateli/aod_9604/
-Adamax Spray — https://elixirpeptide.ru/catalog/uluchshenie_raboty_mozga/sprey_adamax/
-NAD+ — https://elixirpeptide.ru/catalog/mitokhondrialnye/nad/
-Tirzeslim — https://elixirpeptide.ru/catalog/snizhenie_vesa_i_zhiroszhigateli/tirzeslim/
-Capixyl 50 — https://elixirpeptide.ru/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/capixyl_50_kosmeticheskoe_syre/
-BPC-157 + TB-500 — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/bpc-157-tb-500/
-VIP Spray — https://elixirpeptide.ru/catalog/uluchshenie_raboty_mozga/sprey_vip/
-KPV — https://elixirpeptide.ru/catalog/pri_zabolevaniyakh_zhkt/kpv/
-Glow 70 — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/glow_70/
-Glow 40 — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/glow_40/
-GHK-Cu Cosmetic Raw Material — https://elixirpeptide.ru/catalog/anti_age_terapiya_omolozhenie/ghk_cu_kosmeticheskoe_syre/
-GBK — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/gbk/
-Epithalon + DSIP + Ipamorelin Spray — https://elixirpeptide.ru/catalog/dlya_uluchsheniya_sna/sprey_epithalon_dsip_ipamorelin/
-Epithalon / Эпиталон — https://elixirpeptide.ru/catalog/anti_age_terapiya_omolozhenie/epithalon_epitalon/
-BPC-157 — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/bpc_157/
-ARA-290 — https://elixirpeptide.ru/catalog/uluchshenie_raboty_mozga/ara_290/
-GHK-Cu Hydrochloride — https://elixirpeptide.ru/catalog/dlya_immunnoy_sistemy/ghk-cu-hydrochloride/
-Mazdutide — https://elixirpeptide.ru/catalog/mitokhondrialnye/mazdutide/
+Allokin Alpha / Аллокин Альфа — https://elixirpeptide.com/catalog/dlya_immunnoy_sistemy/allokin_alpha_allokin_alfa/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=allokin_alpha_allokin_alfa
+Adipotide / Адипотид — https://elixirpeptide.com/catalog/snizhenie_vesa_i_zhiroszhigateli/adipotide_adipotid/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=adipotide_adipotid
+Semaslim — https://elixirpeptide.com/catalog/snizhenie_vesa_i_zhiroszhigateli/semaslim/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=semaslim
+Retaslim — https://elixirpeptide.com/catalog/snizhenie_vesa_i_zhiroszhigateli/retaslim/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=retaslim
+CJC-1295 — https://elixirpeptide.com/catalog/peptidy_v_sporte/cjc_1295/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=cjc_1295
+Tesamorelin — https://elixirpeptide.com/catalog/peptidy_v_sporte/tesamorelin/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=tesamorelin
+Orforglipron — https://elixirpeptide.com/catalog/kapsuly/kapsuly_orforglipron/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=kapsuly_orforglipron
+5-Amino-1MQ / NNMTi — https://elixirpeptide.com/catalog/mitokhondrialnye/5_amino_1mq_nnmti/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=5_amino_1mq_nnmti
+NAD+ Liposomal — https://elixirpeptide.com/catalog/kapsuly/kapsuly_nad_liposomal/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=kapsuly_nad_liposomal
+Survodutide — https://elixirpeptide.com/catalog/snizhenie_vesa_i_zhiroszhigateli/survodutide/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=survodutide
+Tesofensine — https://elixirpeptide.com/catalog/kapsuly/kapsuly_tesofensine/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=kapsuly_tesofensine
+Melanotan 1 — https://elixirpeptide.com/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/melanotan_1/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=melanotan_1
+Pinealon — https://elixirpeptide.com/catalog/dlya_uluchsheniya_sna/pinealon/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=pinealon
+BPC-157 Spray — https://elixirpeptide.com/catalog/pri_zabolevaniyakh_zhkt/sprey_bpc_157/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_bpc_157
+BAM-15 — https://elixirpeptide.com/catalog/mitokhondrialnye/kapsuly_bam_15/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=kapsuly_bam_15
+SLU-PP-332 — https://elixirpeptide.com/catalog/mitokhondrialnye/kapsuly_slu_pp_332/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=kapsuly_slu_pp_332
+5-Amino-1MQ / NNMTi Capsules — https://elixirpeptide.com/catalog/mitokhondrialnye/kapsuly_5_amino_1mq_nnmti_/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=kapsuly_5_amino_1mq_nnmti_
+Teriparatide — https://elixirpeptide.com/catalog/muzhskoe_i_zhenskoe_zdorove/teriparatide_1mg_3ml/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=teriparatide_1mg_3ml
+Kisspeptin-10 Spray — https://elixirpeptide.com/catalog/dlya_immunnoy_sistemy/sprey_kisspeptin_10/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_kisspeptin_10
+Oxytocin Spray — https://elixirpeptide.com/catalog/anti_age_terapiya_omolozhenie/sprey_oxytocin/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_oxytocin
+Methylene Blue / Метиленовый синий — https://elixirpeptide.com/catalog/dlya_immunnoy_sistemy/metilenovyy_siniy/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=metilenovyy_siniy
+Melanotan 2 Spray — https://elixirpeptide.com/catalog/muzhskoe_i_zhenskoe_zdorove/sprey_melanotan_2_melanotan_ii/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_melanotan_2_melanotan_ii
+VIP — https://elixirpeptide.com/catalog/anti_age_terapiya_omolozhenie/vip/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=vip
+Thymosin Alpha-1 / Тимозин Альфа-1 — https://elixirpeptide.com/catalog/dlya_immunnoy_sistemy/thymosin_alpha_1_timozin_alfa_1/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=thymosin_alpha_1_timozin_alfa_1
+TB-500 — https://elixirpeptide.com/catalog/peptidy_v_sporte/tb_500/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=tb_500
+Syn-Ake — https://elixirpeptide.com/catalog/anti_age_terapiya_omolozhenie/syn_ake_kosmeticheskoe_syre/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=syn_ake_kosmeticheskoe_syre
+SS-31 — https://elixirpeptide.com/catalog/mitokhondrialnye/ss_31/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=ss_31
+Semax Spray — https://elixirpeptide.com/catalog/spreevaya_forma/sprey_semax/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_semax
+Selank Spray — https://elixirpeptide.com/catalog/dlya_uluchsheniya_sna/sprey_selank/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_selank
+PT-141 Spray — https://elixirpeptide.com/catalog/dlya_immunnoy_sistemy/sprey_pt_141/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_pt_141
+PT-141 — https://elixirpeptide.com/catalog/dlya_immunnoy_sistemy/pt_141/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=pt_141
+PNC-27 — https://elixirpeptide.com/catalog/protivoopukholevye/pnc_27/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=pnc_27
+PE-22-28 Spray — https://elixirpeptide.com/catalog/spreevaya_forma/sprey_pe_22_28/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_pe_22_28
+P-21 with Adamantane Spray — https://elixirpeptide.com/catalog/spreevaya_forma/sprey_p_21_with_adamantane/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_p_21_with_adamantane
+P-21 with Adamantane — https://elixirpeptide.com/catalog/uluchshenie_raboty_mozga/p_21_with_adamantane/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=p_21_with_adamantane
+MOTS-c Spray — https://elixirpeptide.com/catalog/spreevaya_forma/sprey_mots_c/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_mots_c
+MOTS-c — https://elixirpeptide.com/catalog/mitokhondrialnye/mots_c/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=mots_c
+Melanotan 2 — https://elixirpeptide.com/catalog/muzhskoe_i_zhenskoe_zdorove/melanotan-2/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=melanotan-2
+Matrixyl 3000 — https://elixirpeptide.com/catalog/anti_age_terapiya_omolozhenie/matrixyl_3000_kosmeticheskoe_syre/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=matrixyl_3000_kosmeticheskoe_syre
+LL-37 — https://elixirpeptide.com/catalog/dlya_immunnoy_sistemy/ll_37/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=ll_37
+KPV Spray — https://elixirpeptide.com/catalog/spreevaya_forma/sprey_kpv/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_kpv
+Kisspeptin-10 — https://elixirpeptide.com/catalog/muzhskoe_i_zhenskoe_zdorove/kisspeptin_10/752/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=kisspeptin_10
+Ipamorelin Spray — https://elixirpeptide.com/catalog/spreevaya_forma/sprey_ipamorelin/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_ipamorelin
+Ipamorelin — https://elixirpeptide.com/catalog/peptidy_v_sporte/ipamorelin_ipamorelin/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=ipamorelin_ipamorelin
+Humanin — https://elixirpeptide.com/catalog/mitokhondrialnye/humanin_khumanin/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=humanin_khumanin
+HEP-1 / Gepon — https://elixirpeptide.com/catalog/dlya_immunnoy_sistemy/hep_1_gepon/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=hep_1_gepon
+Greyverse 20 — https://elixirpeptide.com/catalog/anti_age_terapiya_omolozhenie/greyverse_20_kosmeticheskoe_syre/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=greyverse_20_kosmeticheskoe_syre
+Glutathione / Глутатион — https://elixirpeptide.com/catalog/dlya_immunnoy_sistemy/glutathione_glutation/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=glutathione_glutation
+GHK-Cu Spray — https://elixirpeptide.com/catalog/spreevaya_forma/sprey_ghk_cu/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_ghk_cu
+GHK-Cu — https://elixirpeptide.com/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/ghk_cu/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=ghk_cu
+FOXO4-DRI — https://elixirpeptide.com/catalog/protivoopukholevye/foxo4_dri/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=foxo4_dri
+Eyeseryl — https://elixirpeptide.com/catalog/anti_age_terapiya_omolozhenie/eyeseryl_kosmeticheskoe_syre/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=eyeseryl_kosmeticheskoe_syre
+Epobis Spray — https://elixirpeptide.com/catalog/spreevaya_forma/sprey_epobis/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_epobis
+Epobis — https://elixirpeptide.com/catalog/uluchshenie_raboty_mozga/epobis/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=epobis
+Epithalon Spray — https://elixirpeptide.com/catalog/spreevaya_forma/sprey_epithalon/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_epithalon
+EGF — https://elixirpeptide.com/catalog/anti_age_terapiya_omolozhenie/egf_100mg_kosmeticheskoe_syre/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=egf_100mg_kosmeticheskoe_syre
+DSIP Spray — https://elixirpeptide.com/catalog/dlya_uluchsheniya_sna/sprey_dsip/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_dsip
+DNSP-11 Spray — https://elixirpeptide.com/catalog/spreevaya_forma/sprey_dnsp_11/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_dnsp_11
+CJC-1295 DAC — https://elixirpeptide.com/catalog/peptidy_v_sporte/cjc_1295_dac/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=cjc_1295_dac
+Capixyl 50 + Greyverse 20 — https://elixirpeptide.com/catalog/anti_age_terapiya_omolozhenie/capixyl_50_greyverse_20_kosmeticheskoe_syre/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=capixyl_50_greyverse_20_kosmeticheskoe_syre
+Cagrilintide / Кагрилинтид — https://elixirpeptide.com/catalog/snizhenie_vesa_i_zhiroszhigateli/cagrilintide_kagrilintid/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=cagrilintide_kagrilintid
+AOD-9604 — https://elixirpeptide.com/catalog/snizhenie_vesa_i_zhiroszhigateli/aod_9604/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=aod_9604
+Adamax Spray — https://elixirpeptide.com/catalog/spreevaya_forma/sprey_adamax/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_adamax
+NAD+ — https://elixirpeptide.com/catalog/mitokhondrialnye/nad/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=nad
+Tirzeslim — https://elixirpeptide.com/catalog/snizhenie_vesa_i_zhiroszhigateli/tirzeslim/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=tirzeslim
+Capixyl 50 — https://elixirpeptide.com/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/capixyl_50_kosmeticheskoe_syre/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=capixyl_50_kosmeticheskoe_syre
+BPC-157 + TB-500 — https://elixirpeptide.com/catalog/peptidy_v_sporte/bpc-157-tb-500/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=bpc-157-tb-500
+VIP Spray — https://elixirpeptide.com/catalog/anti_age_terapiya_omolozhenie/sprey_vip/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_vip
+KPV — https://elixirpeptide.com/catalog/pri_zabolevaniyakh_zhkt/kpv/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=kpv
+Glow 70 — https://elixirpeptide.com/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/glow_70/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=glow_70
+Glow 40 — https://elixirpeptide.com/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/glow_40/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=glow_40
+GHK-Cu Cosmetic Raw Material — https://elixirpeptide.com/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/ghk_cu_kosmeticheskoe_syre/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=ghk_cu_kosmeticheskoe_syre
+GBK — https://elixirpeptide.com/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/gbk/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=gbk
+Epithalon + DSIP + Ipamorelin Spray — https://elixirpeptide.com/catalog/spreevaya_forma/sprey_epithalon_dsip_ipamorelin/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=sprey_epithalon_dsip_ipamorelin
+Epithalon / Эпиталон — https://elixirpeptide.com/catalog/anti_age_terapiya_omolozhenie/epithalon_epitalon/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=epithalon_epitalon
+BPC-157 — https://elixirpeptide.com/catalog/peptidy_v_sporte/bpc_157/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=bpc_157
+ARA-290 — https://elixirpeptide.com/catalog/uluchshenie_raboty_mozga/ara_290/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=ara_290
+GHK-Cu Hydrochloride — https://elixirpeptide.com/catalog/kosmeticheskie_peptidy_kozha_volosy_zagar/ghk-cu-hydrochloride/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=ghk-cu-hydrochloride
+Mazdutide — https://elixirpeptide.com/catalog/snizhenie_vesa_i_zhiroszhigateli/mazdutide/?utm_source=telegram_bot&utm_medium=chatbot&utm_campaign=ai_premium&utm_content=mazdutide
 
 
 

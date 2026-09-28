@@ -15,15 +15,16 @@ phone = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, keyboa
 ])
 
 open_app = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="🛒 Открыть магазин 🛍️", web_app=WebAppInfo(url="https://elixirpeptides.devsivanschostakov.org"))],
+    [InlineKeyboardButton(text="🛒 Открыть магазин 🛍️", url="https://elixirpeptide.ru")],
     [InlineKeyboardButton(text="📑 Оферта", callback_data="user:offer"), InlineKeyboardButton(text="Данные ИП 👨🏻‍💻", callback_data="user:about")],
     [back_button]
 ])
 
 main_menu = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="🌿 Наставник по похудению", callback_data="mentor:open")],
     [InlineKeyboardButton(text='🤖 ИИ Ассистенты 🧠', callback_data="user:ai:start"),
      InlineKeyboardButton(text='✖️ Калькуляторы ➗', callback_data="user:calculators")],
-    [InlineKeyboardButton(text="🛒 Открыть магазин 🛍️", web_app=WebAppInfo(url="https://elixirpeptides.devsivanschostakov.org"))],
+    [InlineKeyboardButton(text="🛒 Открыть магазин 🛍️", url="https://elixirpeptide.ru")],
     [InlineKeyboardButton(text="📑 Оферта", callback_data="user:offer"), InlineKeyboardButton(text="Данные ИП 👨🏻‍💻", callback_data="user:about")]
 ])
 

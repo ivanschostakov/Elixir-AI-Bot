@@ -1,3 +1,4 @@
+from src.bot.handlers.mentor import router as mentor_router, shop_button, response_keyboard, reminder_loop, MentorNavigationMiddleware
 import asyncio
 import copy
 import logging
@@ -29,6 +30,7 @@ from src.bot.handlers import *
 from src.ai.helpers import split_text, MAX_TG_MSG_LEN
 from src.bot.keyboards import user_keyboards
 from src.bot.middleware import ContextMiddleware
+from src.bot.miniapp_contact import MiniAppContactMiddleware
 from src.bot.texts import user_texts
 from src.ai.client import ProfessorClient
 from src.ai.webapp_client import webapp_client
@@ -197,7 +199,7 @@ class ProfessorBot(Bot):
     async def parse_response(self, response: dict, message: Message, back_menu: bool = False, adv: bool = False):
         user_id = message.from_user.id
         self.__logger = self.__logger
-        self.__logger.info("INCOMING message | user_id=%s | text=%r",user_id, getattr(message, "text", None))
+        self.__logger.info("INCOMING message | user_id=%s | text=%r",user_id, "[mentor]" if response.get("mentor") else getattr(message, "text", None))
         files = _normalize_response_files(response.get("files") or [], logger=self.__logger)
         text: str = (response.get("text") or "").strip()
         input_tokens: int = int(response.get("input_tokens") or 0)
@@ -214,8 +216,10 @@ class ProfessorBot(Bot):
         if input_tokens or output_tokens:
             self._schedule_background("update_user_token_totals", self._safe_update_token_totals(user_id, input_tokens, output_tokens))
 
-        keyboard = copy.deepcopy(user_keyboards.backk)
+        keyboard = response_keyboard(response) if response.get("mentor") else copy.deepcopy(user_keyboards.backk)
         if adv: keyboard.inline_keyboard.append([InlineKeyboardButton(text="Ознакомиться с программой", url="https://t.me/obucheniepeptid/32"), InlineKeyboardButton(text="Попасть на обучение", url="https://www.peptidecourse.ru/")])
+        if response.get("open_shop") and message.chat.type == "private":
+            keyboard.inline_keyboard.insert(0, [await shop_button(self)])
         reply_markup = keyboard if back_menu else ReplyKeyboardRemove()
         if not files and not text:
             self.__logger.warning("EMPTY response (no files, no text)")
@@ -238,10 +242,11 @@ class ProfessorBot(Bot):
                     await self._reply_text_safe(message, chunk, reply_markup=ReplyKeyboardRemove())
                 sent_message = await self._reply_text_safe(message, chunks[-1], reply_markup=text_markup)
             else:
-                self.__logger.info("OUTGOING text | len=%d | preview=%r", len(out_text), out_text)
+                self.__logger.info("OUTGOING text | len=%d | preview=%r", len(out_text), "[mentor]" if response.get("mentor") else out_text)
                 sent_message = await self._reply_text_safe(message, out_text, reply_markup=text_markup)
 
-        if not files: return sent_message
+        if not files:
+            return sent_message
 
         self.__logger.info("OUTGOING response has %d file(s)", len(files))
         image_files = [(name, content) for name, content in files if _is_image_attachment(name, content)]
@@ -354,7 +359,10 @@ dose_dp.callback_query.middleware(ContextMiddleware(dose_bot, dose_client, role=
 professor_bot = ProfessorBot(PROFESSOR_BOT_TOKEN, BOT_NAMES[PROFESSOR_BOT_TOKEN])
 professor_client = ProfessorClient(PROFESSOR_OPENAI_API, PROFESSOR_ASSISTANT_ID, keyword="new")
 professor_dp = Dispatcher(storage=MemoryStorage())
-professor_dp.include_routers(professor_chat_router, professor_admin_router, professor_user_router, professor_guest_router)
+professor_dp.callback_query.outer_middleware(MentorNavigationMiddleware())
+professor_dp.message.outer_middleware(MentorNavigationMiddleware())
+professor_dp.update.outer_middleware(MiniAppContactMiddleware())
+professor_dp.include_routers(mentor_router, professor_chat_router, professor_admin_router, professor_user_router, professor_guest_router)
 professor_dp.message.middleware(
     ContextMiddleware(
         professor_bot,
@@ -395,5 +403,10 @@ async def run_professor_bot():
     polling_logger.info("Professor bot polling init: deleting webhook")
     await professor_bot.delete_webhook(drop_pending_updates=False)
     polling_logger.info("Professor bot webhook deleted: starting polling")
-    await professor_dp.start_polling(professor_bot)
+    reminder_task = asyncio.create_task(reminder_loop(professor_bot))
+    try:
+        await professor_dp.start_polling(professor_bot)
+    finally:
+        reminder_task.cancel()
+        await asyncio.gather(reminder_task, return_exceptions=True)
     polling_logger.warning("Professor bot start_polling returned")

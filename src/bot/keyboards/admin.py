@@ -7,7 +7,7 @@ main_menu = InlineKeyboardMarkup(inline_keyboard=[
 
 
 open_test = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="Магазин", url="t.me/elixirpeptidebot/test")],
+    [InlineKeyboardButton(text="Магазин", url="https://elixirpeptide.ru")],
 ])
 
 admin_menu = InlineKeyboardMarkup(inline_keyboard=[

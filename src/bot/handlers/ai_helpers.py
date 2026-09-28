@@ -1,3 +1,4 @@
+from src.ai.telegram_mentor import BridgeError
 import io
 import logging
 import mimetypes
@@ -232,7 +233,7 @@ async def ensure_responses_conversation_id(professor_client, user_id: int, conve
 
 
 async def send_message_v2_from_telegram(message: Message, professor_client, user_id: int, conversation_id: str | None, *, input_text_override: str | None = None) -> dict[str, Any]:
-    trace_id = uuid.uuid4().hex[:12]
+    trace_id = f"tg-{message.chat.id}-{message.message_id}"
     started_at = time.monotonic()
     ai_pipeline_logger.info("AI flow start | trace=%s | mode=single | user_id=%s | message_id=%s | conversation_id=%s", trace_id, user_id, message.message_id, conversation_id)
 
@@ -263,7 +264,7 @@ async def send_message_v2_from_telegram(message: Message, professor_client, user
 async def send_message_v2_from_media_group(messages: Sequence[Message], professor_client, user_id: int, conversation_id: str | None, *, input_text_override: str | None = None) -> dict[str, Any]:
     if not messages: raise ValueError("messages must not be empty")
 
-    trace_id = uuid.uuid4().hex[:12]
+    trace_id = f"tg-{messages[0].chat.id}-album-{messages[0].media_group_id}"
     started_at = time.monotonic()
     ai_pipeline_logger.info("AI flow start | trace=%s | mode=album | user_id=%s | messages=%d | conversation_id=%s", trace_id, user_id, len(messages), conversation_id)
 
@@ -301,6 +302,10 @@ async def safe_ai_response(message: Message, request_coro, *, error_text: str = 
         result = await asyncio.wait_for(request_coro, timeout=timeout_seconds)
         ai_pipeline_logger.info("AI wrapper done | user_id=%s | message_id=%s | elapsed_ms=%d | ok=%s", user_id, message_id, _elapsed_ms(started_at), result is not None)
         return result
+
+    except BridgeError as error:
+        await message.answer(str(error), parse_mode=None)
+        return None
 
     except asyncio.CancelledError: raise
     except asyncio.TimeoutError:

@@ -32,3 +32,16 @@ images/
 .vscode/
 .DS_Store
 .ipynb_checkpoints/
+
+# Production-only state must never be published.
+!.env.*.example
+._*
+backups/
+backup/
+*.bak*
+*.backup*
+*.session-*
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+.amocrm_playwright_profile*/

@@ -1,3 +1,4 @@
+from src.ai.telegram_mentor import wrap_client, mentor_enabled, reset_mentor_conversations
 import base64
 import asyncio
 import httpx
@@ -495,10 +496,14 @@ async def handle_course_interval_days(message: Message, state: FSMContext):
 
 @professor_user_router.message(Command('new_chat'))
 async def handle_new_chat(message: Message, state: FSMContext, professor_client, expert_client=None):
+    if mentor_enabled(message.from_user.id):
+        reset_mentor_conversations(message.from_user.id)
+        return await message.answer("Начали новый диалог с наставником. Ваш профиль сохранён.")
     user = await webapp_client.get_user("tg_id", message.from_user.id)
     last_used, has_unknown_last_used = _resolve_last_used(user)
     if user and has_unknown_last_used: schedule_webapp_call(safe_webapp_call(webapp_client.update_user(message.from_user.id, {"last_used": last_used}), operation="update_last_used"), operation="update_last_used")
     active_client = _resolve_mode_client(last_used, professor_client, expert_client)
+    active_client = wrap_client(active_client, message.from_user.id, last_used)
     conversation_id = await active_client.create_conversation(user_id=message.from_user.id)
     await safe_webapp_call(webapp_client.upsert_user({"tg_id": message.from_user.id, "name": message.from_user.first_name, "surname": message.from_user.last_name, "conversation_id": conversation_id, "last_used": last_used}), operation="upsert_conversation_id")
     return await message.answer(user_texts.new_chat)
@@ -580,6 +585,7 @@ async def handle_media_group(messages: list[Message], state: FSMContext, profess
     existing_user = await webapp_client.get_user("tg_id", user_id)
     last_used, has_unknown_last_used = _resolve_last_used(existing_user)
     active_client = _resolve_mode_client(last_used, professor_client, expert_client)
+    active_client = wrap_client(active_client, message.from_user.id, last_used)
     user = await _ensure_user(message, active_client)
     if has_unknown_last_used:
         schedule_webapp_call(safe_webapp_call(webapp_client.update_user(user_id, {"last_used": last_used}), operation="update_last_used"), operation="update_last_used")
@@ -623,6 +629,7 @@ async def handle_single_ai_message(message: Message, state: FSMContext, professo
     existing_user = await webapp_client.get_user("tg_id", user_id)
     last_used, has_unknown_last_used = _resolve_last_used(existing_user)
     active_client = _resolve_mode_client(last_used, professor_client, expert_client)
+    active_client = wrap_client(active_client, message.from_user.id, last_used)
     user = await _ensure_user(message, active_client)
     if has_unknown_last_used:
         schedule_webapp_call(safe_webapp_call(webapp_client.update_user(user_id, {"last_used": last_used}), operation="update_last_used"), operation="update_last_used")
