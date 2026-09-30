@@ -32,23 +32,23 @@ def button(label, action):
 def menu(gates=None):
     gates = gates or {}
     closed = {x.strip() for x in config.env("TELEGRAM_MENTOR_CLOSED_SECTIONS", "").split(",")}
-    items = [("Сегодня", "today"), ("Питание", "food"), ("Тренировки", "workouts"),
-             ("Мой курс", "course"), ("Прогресс", "progress"), ("Спросить наставника", "ask"),
-             ("Профиль", "profile"), ("Настройки", "settings")]
+    items = [("📅 Сегодня", "today"), ("🍽 Питание", "food"), ("🏋️ Тренировки", "workouts"),
+             ("🧬 Мой курс", "course"), ("📊 Прогресс", "progress"), ("💬 Спросить наставника", "ask"),
+             ("👤 Профиль", "profile"), ("⚙️ Настройки", "settings")]
     visible = [button(label, action) for label, action in items if gates.get(action, True) and action not in closed]
-    rows = [[button("Добавить еду", "meal")]] if gates.get("food", True) and "food" not in closed else []
+    rows = [[button("➕ Добавить еду", "meal")]] if gates.get("food", True) and "food" not in closed else []
     rows += [visible[i:i+2] for i in range(0, len(visible), 2)]
     return InlineKeyboardMarkup(inline_keyboard=[*rows, [button("← Обычный ИИ", "leave")]])
 
 
 SECTIONS = {
-    "food": ("Питание",[("Добавить еду","meal"),("Итоги питания","nutrition"),("Повторить предыдущую еду","repeat_previous"),
-        ("Избранное","favorites"),("Поиск по дневнику","meal_search"),("История еды","meals:0"),("Мои нормы КБЖУ","target"),("Что поесть?","suggest")]),
-    "progress": ("Прогресс",[("Записать вес","weight"),("Последние измерения веса","history"),("Замеры","measurement"),("Добавить фото","progress_photo"),("Фото и замеры","measurements"),("За 7 дней","weekly"),("За 30 дней","monthly")]),
+    "food": ("🍽 Питание",[("📷 Добавить по фото","meal:photo"),("🎙 Добавить голосом","meal:voice"),("✍️ Добавить текстом","meal:text"),("⭕ Отправить кружок","meal:video"),
+        ("♻️ Повторить прошлый приём","repeat_previous"),("⭐ Любимые блюда","favorites"),("🔎 Найти в дневнике","meal_search"),("📊 Итоги за сегодня","nutrition"),("🍲 Что мне поесть?","suggest"),("📅 История питания","meals:0"),("Мои нормы КБЖУ","target")]),
+    "progress": ("📊 Прогресс",[("⚖️ Добавить вес","weight"),("📏 Добавить замеры","measurement"),("📷 Добавить фото","progress_photo"),("📈 График веса","weight_chart"),("Последние измерения веса","history"),("Фото и замеры","measurements"),("🏋️ Прогресс тренировок","workout_results"),("📊 Отчёт за неделю","weekly"),("За месяц","monthly")]),
     "plan": ("🎯 Мой план",[("План на сегодня","daily_plan"),("Скорректировать план","adjust")]),
     "profile": ("Профиль",[("Мои данные и цель","data"),("Изменить цель","goals")]),
     "settings": ("Настройки",[("Напоминания","reminders"),("Часовой пояс","timezone"),("Приватность","privacy")]),
-    "ask": ("Спросить наставника",[("Что поесть?","suggest"),("План на сегодня","daily_plan"),("Скорректировать план","adjust"),("Задать вопрос","question")])}
+    "ask": ("💬 Спросить наставника",[("🍲 Что поесть?","suggest"),("📊 Проанализировать мой день","analyze_day"),("🏋️ Скорректировать тренировку","reason:workout"),("⚖️ Почему вес стоит?","reason:plateau"),("🧬 Вопрос по моему курсу","specialist"),("💬 Задать свой вопрос","question"),("✏️ Скорректировать план","adjust")])}
 
 
 def section_keyboard(section):
@@ -64,8 +64,8 @@ def response_keyboard(response):
     keyboard=back_keyboard()
     draft=response.get("meal_draft")
     if draft:
-        keyboard.inline_keyboard.insert(0,[button("Записать в дневник",f"meal_confirm:{draft['id']}"),button("Не записывать",f"meal_cancel:{draft['id']}")])
-        keyboard.inline_keyboard.insert(1,[button("Исправить",f"meal_edit:{draft['id']}"),button("Добавить ещё еду","meal")])
+        keyboard.inline_keyboard.insert(0,[button("✅ Всё верно",f"meal_confirm:{draft['id']}"),button("❌ Отменить",f"meal_cancel:{draft['id']}")])
+        keyboard.inline_keyboard.insert(1,[button("✏️ Изменить",f"meal_edit:{draft['id']}"),button("➕ Добавить продукт",f"meal_add:{draft['id']}")])
     return keyboard
 
 
@@ -91,7 +91,7 @@ class MentorNavigationMiddleware(BaseMiddleware):
 
 
 def fmt(value):
-    return f"{float(value):g}" if value is not None else "не указан"
+    return f"{float(value):,.2f}".rstrip("0").rstrip(".").replace(",", " ").replace(".", ",") if value is not None else "не указан"
 
 
 async def enter(message,user_id,state,*,onboarding=True):
@@ -100,16 +100,15 @@ async def enter(message,user_id,state,*,onboarding=True):
     clear_opening_question(user_id,opening_question(user_id))
     try:
         saved=await api("/dashboard",{"telegram_user_id":user_id});p=saved.get("profile",{})
-        text="Наставник ElixirPeptide\n\n"
-        if p.get("current_weight_kg") is not None: text+=f"Последний вес: {fmt(p['current_weight_kg'])} кг.\n"
-        if p.get("target_weight_kg") is not None: text+=f"Цель: {fmt(p['target_weight_kg'])} кг.\n"
+        from .mentor_flows import home_view
+        text=home_view(saved)
         questions=[("goal","Какого результата по весу хотите достичь?"),("current_weight_kg","Сколько вы сейчас весите?"),
             ("height_cm","Какой у вас рост?"),("age","Сколько вам лет?"),("target_weight_kg","Какого веса хотите достичь?"),
             ("activity","Какая у вас обычно физическая активность?")]
         questions = [(field, q) for field, q in questions if field != "target_weight_kg" or p.get("goal") in {"weight_loss", "weight_gain"}]
         question=next((q for field,q in questions if p.get(field) is None),None) if onboarding else None
         if question:
-            text+="\n"+question;save_opening_question(user_id,question)
+            text+="\n\nДозаполните профиль: "+question;save_opening_question(user_id,question)
         else: text+="\nВыберите действие или просто напишите сообщение."
     except BridgeError:
         saved = {}
@@ -129,9 +128,11 @@ async def ask(message,uid,text):
 
 def today_text(data):
     t=data.get("totals", {"kcal": 0, "protein": 0, "fat": 0, "carbs": 0})
-    lines=[f"🍽 Сегодня · {data.get('date', '')}","",*[f"• {m['name']} — ≈ {fmt(m['kcal'])} ккал" for m in data.get("meals", [])[-12:]],"",
-        f"Итого: ≈ {fmt(t['kcal'])} ккал",f"Б {fmt(t['protein'])} г · Ж {fmt(t['fat'])} г · У {fmt(t['carbs'])} г",
-        "Учитываются только записанные приёмы пищи. КБЖУ — приблизительная оценка."]
+    target=data.get("workspace", {}).get("target") or {}
+    lines=[f"📊 Ваши итоги за сегодня · {data.get('date', '')}", ""]
+    for key,label,unit in [("kcal","Калории","ккал"),("protein","Белки","г"),("fat","Жиры","г"),("carbs","Углеводы","г")]:
+        lines.append(f"{label}: ≈ {fmt(t[key])} / {fmt(target.get(key))} {unit}")
+    lines += ["", "Учитываются только записанные приёмы пищи. КБЖУ — приблизительная оценка."]
     if not data.get("meals"):
         lines.insert(2, "Сегодня в дневнике ещё нет записанной еды.")
     remaining = data.get("workspace", {}).get("remaining")
@@ -204,7 +205,8 @@ async def mentor_action(query:CallbackQuery,state:FSMContext,professor_bot=None,
         if await dispatch(query, state, action, professor_bot, professor_client, expert_client): return
         if action in SECTIONS:
             return await query.message.answer(SECTIONS[action][0],reply_markup=section_keyboard(action),parse_mode=None)
-        if action=="meal": return await ask(query.message,uid,"Что вы ели? Пришлите текст, фото, голосовое или видеокружок с описанием порции. Медиа доступны в режиме ИИ-профессора.")
+        if action=="meal" or action.startswith("meal:"):
+            return await ask(query.message,uid,"Отправьте фотографию еды, голосовое сообщение, видеокружок или напишите, что вы съели. Например: «гречка 150 г, куриная грудка 200 г и овощной салат».\nДля кружка используйте кнопку видео в Telegram. Медиа доступны в режиме ИИ-профессора.")
         if action=="weight": return await ask(query.message,uid,"Сколько вы сейчас весите, в килограммах?")
         if action=="question": return await ask(query.message,uid,"Что хотите обсудить?")
         if action in {"nutrition","history","data"}:
@@ -212,7 +214,11 @@ async def mentor_action(query:CallbackQuery,state:FSMContext,professor_bot=None,
             section={"nutrition":"food","history":"progress","data":"profile"}[action]
             text={"nutrition":today_text,"history":history_text,"data":lambda d:profile_text(d['profile'])}[action](data)
             if action=="data": save_opening_question(uid,"Какие данные профиля или цель хотите изменить?")
-            return await query.message.answer(text,reply_markup=section_keyboard(section),parse_mode=None)
+            kb=section_keyboard(section)
+            if action=="nutrition":
+                from .mentor_flows import keyboard
+                kb=keyboard([("🍽 Что поесть?","suggest")],[("📋 Все приёмы пищи","meals:0")],[("📷 Добавить еду","meal")])
+            return await query.message.answer(text,reply_markup=kb,parse_mode=None)
         if action in {"daily_plan","suggest"}:
             text={"daily_plan":"Составь мой короткий практический план на сегодня по сохранённому профилю и дневнику. Используй имеющиеся данные, не начинай анкету заново.",
                   "suggest":"Что мне поесть сегодня с учётом моего профиля, ограничений и записанной еды? Предложи несколько простых вариантов, не записывая их в дневник."}[action]
@@ -221,6 +227,13 @@ async def mentor_action(query:CallbackQuery,state:FSMContext,professor_bot=None,
             kind,value=action.split(":",1)
             result=await api("/journal/action",{"telegram_user_id":uid,"entry_id":int(value),"action":"confirm" if kind=="meal_confirm" else "cancel"})
             text="Добавлено в дневник. Итоги за сегодня обновлены." if result['entry']['status']=='confirmed' else "Оценка не записана в дневник."
+            if result['entry']['status']=='confirmed':
+                entry=result['entry']
+                text=f"Добавлено: {entry['name']}\n≈ {fmt(entry['kcal'])} ккал\nБелки: {fmt(entry['protein'])} г\nЖиры: {fmt(entry['fat'])} г\nУглеводы: {fmt(entry['carbs'])} г"
+                saved=await api("/dashboard", {"telegram_user_id":uid})
+                remaining=saved.get("workspace", {}).get("remaining") or {}
+                if remaining:
+                    text+="\n\nОсталось: "+"; ".join(f"{fmt(remaining[k])} {unit}" for k,unit in [("kcal","ккал"),("protein","г белка")] if k in remaining)
             await query.message.edit_reply_markup(reply_markup=back_keyboard())
             return await query.message.answer(text,reply_markup=section_keyboard('food'))
         if action=="reminders": return await show_reminders(query.message,uid)
