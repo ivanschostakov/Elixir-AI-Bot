@@ -32,6 +32,32 @@ class State:
     async def clear(self): self.values = {}; self.state = None
 
 
+def test_reports_do_not_expose_details_without_opt_in(monkeypatch):
+    data = dashboard()
+    data["profile"]["current_weight_kg"] = 91
+    monkeypatch.setattr(mentor, "api", AsyncMock(return_value=data))
+    bot = SimpleNamespace(send_message=AsyncMock(), send_photo=AsyncMock())
+    asyncio.run(mentor.send_reminder(bot, {"telegram_user_id":123, "kind":"weekly", "text":"Пора посмотреть итоги."}))
+    assert bot.send_message.await_args.args[1] == "Пора посмотреть итоги."
+    bot.send_photo.assert_not_awaited()
+
+
+def test_opt_in_weekly_report_sends_chart_and_saved_totals(monkeypatch):
+    data = dashboard()
+    data["settings"]["reminders"] = {"detailed_reports":True}
+    data["workspace"]["weekly"] = {"from":"2030-01-01", "to":"2030-01-07", "average_kcal":1860,
+        "workouts":3, "planned_workouts":3, "course_done":1, "course_due":1, "nutrition_days":5}
+    monkeypatch.setattr(mentor, "api", AsyncMock(return_value=data))
+    monkeypatch.setattr(f, "weight_chart_png", lambda _: b"png-test")
+    bot = SimpleNamespace(send_message=AsyncMock(), send_photo=AsyncMock())
+    asyncio.run(mentor.send_reminder(bot, {"telegram_user_id":123, "kind":"weekly", "text":"Итоги"}))
+    text = bot.send_photo.await_args.kwargs["caption"]
+    assert "1 860" in text and "дней с записями: 5" in text
+    assert len(text) < 1024
+    assert bot.send_photo.await_args.kwargs["protect_content"]
+    bot.send_message.assert_not_awaited()
+
+
 def test_profile_update_keeps_diary_and_existing_profile(monkeypatch):
     call = AsyncMock(return_value={"ok": True, "profile": {"goal": "weight_gain"}, "version": 3})
     monkeypatch.setattr(t, "api", call)

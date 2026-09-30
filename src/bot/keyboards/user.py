@@ -21,7 +21,7 @@ open_app = InlineKeyboardMarkup(inline_keyboard=[
 ])
 
 main_menu = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="🌿 Наставник по похудению", callback_data="mentor:open")],
+    [InlineKeyboardButton(text="🌿 Наставник ElixirPeptide", callback_data="mentor:open")],
     [InlineKeyboardButton(text='🤖 ИИ Ассистенты 🧠', callback_data="user:ai:start"),
      InlineKeyboardButton(text='✖️ Калькуляторы ➗', callback_data="user:calculators")],
     [InlineKeyboardButton(text="🛒 Открыть магазин 🛍️", url="https://elixirpeptide.ru")],

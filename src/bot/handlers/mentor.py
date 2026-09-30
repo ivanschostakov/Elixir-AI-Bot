@@ -43,7 +43,7 @@ def menu(gates=None):
 
 SECTIONS = {
     "food": ("🍽 Питание",[("📷 Добавить по фото","meal:photo"),("🎙 Добавить голосом","meal:voice"),("✍️ Добавить текстом","meal:text"),("⭕ Отправить кружок","meal:video"),
-        ("♻️ Повторить прошлый приём","repeat_previous"),("⭐ Любимые блюда","favorites"),("🔎 Найти в дневнике","meal_search"),("📊 Итоги за сегодня","nutrition"),("🍲 Что мне поесть?","suggest"),("📅 История питания","meals:0"),("Мои нормы КБЖУ","target")]),
+        ("♻️ Повторить прошлый приём","repeat_previous"),("⭐ Любимые блюда","favorites"),("🔎 Найти продукт","food_lookup"),("📊 Итоги за сегодня","nutrition"),("🍲 Что мне поесть?","suggest"),("📅 История питания","meals:0"),("Мои нормы КБЖУ","target")]),
     "progress": ("📊 Прогресс",[("⚖️ Добавить вес","weight"),("📏 Добавить замеры","measurement"),("📷 Добавить фото","progress_photo"),("📈 График веса","weight_chart"),("Последние измерения веса","history"),("Фото и замеры","measurements"),("🏋️ Прогресс тренировок","workout_results"),("📊 Отчёт за неделю","weekly"),("За месяц","monthly")]),
     "plan": ("🎯 Мой план",[("План на сегодня","daily_plan"),("Скорректировать план","adjust")]),
     "profile": ("Профиль",[("Мои данные и цель","data"),("Изменить цель","goals")]),
@@ -103,7 +103,7 @@ async def enter(message,user_id,state,*,onboarding=True):
         from .mentor_flows import home_view
         text=home_view(saved)
         questions=[("goal","Какого результата по весу хотите достичь?"),("current_weight_kg","Сколько вы сейчас весите?"),
-            ("height_cm","Какой у вас рост?"),("age","Сколько вам лет?"),("target_weight_kg","Какого веса хотите достичь?"),
+            ("height_cm","Какой у вас рост?"),("age","Сколько вам лет?"),("sex","Укажите пол для расчёта КБЖУ: мужской или женский."),("target_weight_kg","Какого веса хотите достичь?"),
             ("activity","Какая у вас обычно физическая активность?")]
         questions = [(field, q) for field, q in questions if field != "target_weight_kg" or p.get("goal") in {"weight_loss", "weight_gain"}]
         question=next((q for field,q in questions if p.get(field) is None),None) if onboarding else None
@@ -188,27 +188,38 @@ async def run_ai_action(query,state,professor_bot,professor_client,expert_client
 
 @router.callback_query(F.data.startswith("mentor:"))
 async def mentor_action(query:CallbackQuery,state:FSMContext,professor_bot=None,professor_client=None,expert_client=None):
+    from .mentor_panel import MentorPanel, navigate_page
+    if query.data.startswith("mentor:page:"):
+        return await navigate_page(query, state)
+    panel = MentorPanel(query.message, state)
+    try:
+        await perform_action(query, state, panel, professor_bot, professor_client, expert_client)
+    finally:
+        await panel.flush()
+
+
+async def perform_action(query,state,message,professor_bot=None,professor_client=None,expert_client=None):
     uid=query.from_user.id;action=query.data.removeprefix("mentor:")
     await query.answer()
     if action=="leave":
         from src.bot.keyboards import user_keyboards
         set_mentor_enabled(uid,False);await state.clear()
         clear_opening_question(uid,opening_question(uid))
-        return await query.message.answer("Вы вернулись к обычному ИИ-ассистенту. Задайте свой вопрос.",reply_markup=user_keyboards.backk)
+        return await message.answer("Вы вернулись к обычному ИИ-ассистенту. Задайте свой вопрос.",reply_markup=user_keyboards.backk)
     if action in {"open","menu","start"}:
-        return await enter(query.message,uid,state,onboarding=action!="menu")
+        return await enter(message,uid,state,onboarding=action!="menu")
     if not mentor_enabled(uid):
-        return await query.message.answer("Откройте наставника, чтобы продолжить.",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[button("🌿 Наставник по похудению","open")]]))
+        return await message.answer("Откройте наставника, чтобы продолжить.",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[button("🌿 Наставник ElixirPeptide","open")]]))
     await state.set_state(None);clear_opening_question(uid,opening_question(uid))
     try:
         from .mentor_flows import dispatch
-        if await dispatch(query, state, action, professor_bot, professor_client, expert_client): return
+        if await dispatch(query, state, action, professor_bot, professor_client, expert_client, panel=message): return
         if action in SECTIONS:
-            return await query.message.answer(SECTIONS[action][0],reply_markup=section_keyboard(action),parse_mode=None)
+            return await message.answer(SECTIONS[action][0],reply_markup=section_keyboard(action),parse_mode=None)
         if action=="meal" or action.startswith("meal:"):
-            return await ask(query.message,uid,"Отправьте фотографию еды, голосовое сообщение, видеокружок или напишите, что вы съели. Например: «гречка 150 г, куриная грудка 200 г и овощной салат».\nДля кружка используйте кнопку видео в Telegram. Медиа доступны в режиме ИИ-профессора.")
-        if action=="weight": return await ask(query.message,uid,"Сколько вы сейчас весите, в килограммах?")
-        if action=="question": return await ask(query.message,uid,"Что хотите обсудить?")
+            return await ask(message,uid,"Отправьте фотографию еды, голосовое сообщение, видеокружок или напишите, что вы съели. Например: «гречка 150 г, куриная грудка 200 г и овощной салат».\nДля кружка используйте кнопку видео в Telegram. Медиа доступны в режиме ИИ-профессора.")
+        if action=="weight": return await ask(message,uid,"Сколько вы сейчас весите, в килограммах?")
+        if action=="question": return await ask(message,uid,"Что хотите обсудить?")
         if action in {"nutrition","history","data"}:
             data=await api("/dashboard",{"telegram_user_id":uid})
             section={"nutrition":"food","history":"progress","data":"profile"}[action]
@@ -218,7 +229,7 @@ async def mentor_action(query:CallbackQuery,state:FSMContext,professor_bot=None,
             if action=="nutrition":
                 from .mentor_flows import keyboard
                 kb=keyboard([("🍽 Что поесть?","suggest")],[("📋 Все приёмы пищи","meals:0")],[("📷 Добавить еду","meal")])
-            return await query.message.answer(text,reply_markup=kb,parse_mode=None)
+            return await message.answer(text,reply_markup=kb,parse_mode=None)
         if action in {"daily_plan","suggest"}:
             text={"daily_plan":"Составь мой короткий практический план на сегодня по сохранённому профилю и дневнику. Используй имеющиеся данные, не начинай анкету заново.",
                   "suggest":"Что мне поесть сегодня с учётом моего профиля, ограничений и записанной еды? Предложи несколько простых вариантов, не записывая их в дневник."}[action]
@@ -234,25 +245,33 @@ async def mentor_action(query:CallbackQuery,state:FSMContext,professor_bot=None,
                 remaining=saved.get("workspace", {}).get("remaining") or {}
                 if remaining:
                     text+="\n\nОсталось: "+"; ".join(f"{fmt(remaining[k])} {unit}" for k,unit in [("kcal","ккал"),("protein","г белка")] if k in remaining)
-            await query.message.edit_reply_markup(reply_markup=back_keyboard())
-            return await query.message.answer(text,reply_markup=section_keyboard('food'))
-        if action=="reminders": return await show_reminders(query.message,uid)
+            return await message.answer(text,reply_markup=section_keyboard('food'))
+        if action=="reminders": return await show_reminders(message,uid)
         if action.startswith("remind:"):
             value=action.removeprefix("remind:")
             settings=(await api("/dashboard",{"telegram_user_id":uid}))['settings']
             await api("/reminder/settings",{"telegram_user_id":uid,"timezone":settings['timezone'],"daily_time":None if value=='off' else value})
-            return await show_reminders(query.message,uid)
+            return await show_reminders(message,uid)
         if action=="timezone":
             await state.set_state(SettingsInput.timezone)
-            return await query.message.answer("Введите часовой пояс, например Europe/Moscow, Asia/Yekaterinburg или America/Chicago.",reply_markup=back_keyboard())
-        await query.message.answer("Эта старая кнопка больше не используется. Выберите действие в меню.",reply_markup=menu())
+            return await message.answer("Введите часовой пояс, например Europe/Moscow, Asia/Yekaterinburg или America/Chicago.",reply_markup=back_keyboard())
+        await message.answer("Эта старая кнопка больше не используется. Выберите действие в меню.",reply_markup=menu())
     except (BridgeError,ValueError) as error:
         text=str(error) if isinstance(error,BridgeError) else "Не удалось обработать действие. Откройте меню и попробуйте снова."
-        await query.message.answer(text,reply_markup=back_keyboard(),parse_mode=None)
+        await message.answer(text,reply_markup=back_keyboard(),parse_mode=None)
 
 
 @router.message(SettingsInput.timezone)
 async def timezone_input(message:Message,state:FSMContext):
+    from .mentor_panel import reply_panel
+    panel = await reply_panel(message, state)
+    try:
+        await save_timezone(panel if panel is not None else message, state)
+    finally:
+        if panel is not None: await panel.flush()
+
+
+async def save_timezone(message,state):
     if not mentor_enabled(message.from_user.id):
         await state.clear()
         return
@@ -278,8 +297,7 @@ async def reminder_loop(bot):
                         if not (await api("/reminder/check", {**receipt, "outcome": "sent"})).get("deliver"):
                             continue
                         if not reminder_was_delivered(item['telegram_user_id'], item['delivery_id']):
-                            await bot.send_message(item['telegram_user_id'],item['text'],
-                                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[button("Открыть наставника","open")]]))
+                            await send_reminder(bot, item)
                             remember_delivery(item['telegram_user_id'], item['delivery_id'])
                         await api("/reminder/ack", {**receipt, "outcome": "sent"})
                         forget_delivery(item['telegram_user_id'], item['delivery_id'])
@@ -292,6 +310,35 @@ async def reminder_loop(bot):
         except Exception:
             log.warning("Mentor reminder poll failed")
         await asyncio.sleep(60)
+
+
+async def send_reminder(bot, item):
+    from aiogram.types import BufferedInputFile
+    from .mentor_flows import fmt as number, weight_chart_png
+    markup=InlineKeyboardMarkup(inline_keyboard=[[button("Открыть наставника", "open")]])
+    text=item['text']
+    image=None
+    if item['kind'] in {"evening", "weekly"}:
+        saved=await api("/dashboard", {"telegram_user_id": item['telegram_user_id']})
+        if saved.get("settings", {}).get("reminders", {}).get("detailed_reports"):
+            if item['kind']=="evening":
+                text=today_text(saved)
+            else:
+                report=saved['workspace']['weekly']
+                text="📊 Отчёт за неделю\n"+report['from']+" — "+report['to']+"\n"+"\n".join([
+                    f"Изменение веса: {number(report.get('weight_change_kg'))} кг",
+                    f"Средний вес: {number(report.get('weight_mean_7d'))} кг",
+                    f"Средняя калорийность: {number(report.get('average_kcal'))} ккал · дней с записями: {report.get('nutrition_days', 0)}",
+                    f"Белок к норме: {number(report.get('protein_target_percent'))}%",
+                    f"Тренировки: {report['workouts']} · в плане {report.get('planned_workouts', 0)}",
+                    f"Курс: {report['course_done']} / {report['course_due']}",
+                    f"Энергия: {number(report.get('energy_mean'))} / 5",
+                    "Продолжайте дневник и сравнивайте недельные средние. Пропущенные записи не считаются нулём."])
+                image=await asyncio.to_thread(weight_chart_png, saved)
+    if image is not None:
+        await bot.send_photo(item['telegram_user_id'], BufferedInputFile(image, filename="weekly-weight.png"), caption=text, parse_mode=None, protect_content=True, reply_markup=markup)
+    else:
+        await bot.send_message(item['telegram_user_id'], text, parse_mode=None, protect_content=True, reply_markup=markup)
 
 
 from .mentor_flows import router as flows_router
