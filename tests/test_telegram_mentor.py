@@ -148,7 +148,7 @@ def test_mentor_entry_uses_saved_profile_and_asks_one_question(monkeypatch):
     assert text.count('?')==1 and 'активность' in text
     assert t.opening_question(456)=='Какая у вас обычно физическая активность?'
     buttons=msg.answer.await_args.kwargs['reply_markup'].inline_keyboard
-    assert [b.callback_data for row in buttons for b in row] == ['mentor:food','mentor:progress','mentor:plan','mentor:profile','mentor:leave']
+    assert [b.callback_data for row in buttons for b in row] == ['mentor:meal','mentor:today','mentor:food','mentor:workouts','mentor:course','mentor:progress','mentor:ask','mentor:profile','mentor:settings','mentor:leave']
 
 
 def test_meal_tool_cannot_confirm_or_spoof_identity(monkeypatch):
@@ -165,7 +165,7 @@ def test_meal_tool_cannot_confirm_or_spoof_identity(monkeypatch):
 def test_menu_meal_confirmation_and_no_fabricated_progress():
     from src.bot.handlers import mentor
     actions=[b.callback_data for row in mentor.menu().inline_keyboard for b in row]
-    assert actions==['mentor:food','mentor:progress','mentor:plan','mentor:profile','mentor:leave']
+    assert actions==['mentor:meal','mentor:today','mentor:food','mentor:workouts','mentor:course','mentor:progress','mentor:ask','mentor:profile','mentor:settings','mentor:leave']
     reply=mentor.response_keyboard({'meal_draft':{'id':12}})
     assert reply.inline_keyboard[0][0].callback_data=='mentor:meal_confirm:12'
     assert 'Истории измерений пока нет' in mentor.history_text({'profile':{'current_weight_kg':110}})

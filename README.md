@@ -12,6 +12,24 @@ Python service that runs three specialized Telegram AI assistants for the Elixir
 - Enforces soft and hard conversation token limits.
 - Records operational heartbeat state without committing runtime logs.
 
+## Mentor Workspace
+
+`/mentor` opens Today, Nutrition, Workouts, My Course, Progress, Ask Mentor,
+Profile and Settings. Confirmed meals, training sets, existing course schedules,
+measurements and notification rules are stored through the signed shop API.
+Ordinary AI conversations, subscription checks and media limits are unchanged.
+
+Deploy the matching Shop Application backend before restarting this bot.
+The reminder protocol uses leases and delivery acknowledgements; stop the old bot
+while changing the backend contract, and roll both back together if needed.
+Preserve `.env`, `data/`, instruction files and Telegram sessions.
+
+Configuration: `TELEGRAM_MENTOR_CLOSED_SECTIONS` is empty by default;
+`TELEGRAM_MENTOR_SPECIALIST_URL` must be an explicitly approved HTTPS destination.
+The bot never generates medical prescriptions or changes doses itself.
+Implementation and operational details are maintained in the Shop Application
+repository at `integrations/telegram-ai-bot/README.md`.
+
 ## Architecture
 
 ```text

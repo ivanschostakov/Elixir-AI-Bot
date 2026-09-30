@@ -1,4 +1,4 @@
-"""Four-section mentor menu with a free-text conversation behind each action."""
+"""Telegram mentor navigation; AI media stays on the existing gated transport."""
 import asyncio
 import hashlib
 import logging
@@ -12,7 +12,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramForbiddenError
 import config
 from src.ai.telegram_mentor import (BridgeError, configured, api, set_mentor_enabled,
-    mentor_enabled, save_opening_question, clear_opening_question, opening_question)
+    mentor_enabled, save_opening_question, clear_opening_question, opening_question,
+    reminder_was_delivered, remember_delivery, forget_delivery)
 
 router = Router(name="telegram_mentor")
 router.message.filter(F.chat.type == "private")
@@ -28,18 +29,26 @@ def button(label, action):
     return InlineKeyboardButton(text=label, callback_data="mentor:"+action)
 
 
-def menu():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [button("🍽 Питание","food"),button("⚖️ Мой прогресс","progress")],
-        [button("🎯 Мой план","plan"),button("👤 Мой профиль","profile")],
-        [button("← Обычный ИИ","leave")]])
+def menu(gates=None):
+    gates = gates or {}
+    closed = {x.strip() for x in config.env("TELEGRAM_MENTOR_CLOSED_SECTIONS", "").split(",")}
+    items = [("Сегодня", "today"), ("Питание", "food"), ("Тренировки", "workouts"),
+             ("Мой курс", "course"), ("Прогресс", "progress"), ("Спросить наставника", "ask"),
+             ("Профиль", "profile"), ("Настройки", "settings")]
+    visible = [button(label, action) for label, action in items if gates.get(action, True) and action not in closed]
+    rows = [[button("Добавить еду", "meal")]] if gates.get("food", True) and "food" not in closed else []
+    rows += [visible[i:i+2] for i in range(0, len(visible), 2)]
+    return InlineKeyboardMarkup(inline_keyboard=[*rows, [button("← Обычный ИИ", "leave")]])
 
 
 SECTIONS = {
-    "food": ("🍽 Питание",[("Добавить еду","meal"),("Итоги за сегодня","today"),("Что поесть?","suggest")]),
-    "progress": ("⚖️ Мой прогресс",[("Записать вес","weight"),("Посмотреть динамику","history")]),
+    "food": ("Питание",[("Добавить еду","meal"),("Итоги питания","nutrition"),("Повторить предыдущую еду","repeat_previous"),
+        ("Избранное","favorites"),("Поиск по дневнику","meal_search"),("История еды","meals:0"),("Мои нормы КБЖУ","target"),("Что поесть?","suggest")]),
+    "progress": ("Прогресс",[("Записать вес","weight"),("Последние измерения веса","history"),("Замеры","measurement"),("Добавить фото","progress_photo"),("Фото и замеры","measurements"),("За 7 дней","weekly"),("За 30 дней","monthly")]),
     "plan": ("🎯 Мой план",[("План на сегодня","daily_plan"),("Скорректировать план","adjust")]),
-    "profile": ("👤 Мой профиль",[("Мои данные и цель","data"),("Напоминания","reminders")])}
+    "profile": ("Профиль",[("Мои данные и цель","data"),("Изменить цель","goals")]),
+    "settings": ("Настройки",[("Напоминания","reminders"),("Часовой пояс","timezone"),("Приватность","privacy")]),
+    "ask": ("Спросить наставника",[("Что поесть?","suggest"),("План на сегодня","daily_plan"),("Скорректировать план","adjust"),("Задать вопрос","question")])}
 
 
 def section_keyboard(section):
@@ -56,6 +65,7 @@ def response_keyboard(response):
     draft=response.get("meal_draft")
     if draft:
         keyboard.inline_keyboard.insert(0,[button("Записать в дневник",f"meal_confirm:{draft['id']}"),button("Не записывать",f"meal_cancel:{draft['id']}")])
+        keyboard.inline_keyboard.insert(1,[button("Исправить",f"meal_edit:{draft['id']}"),button("Добавить ещё еду","meal")])
     return keyboard
 
 
@@ -76,7 +86,7 @@ class MentorNavigationMiddleware(BaseMiddleware):
             set_mentor_enabled(event.from_user.id,False)
             clear_opening_question(event.from_user.id,opening_question(event.from_user.id))
             state=data.get("state")
-            if state and await state.get_state()==SettingsInput.timezone.state: await state.clear()
+            if state: await state.clear()
         return await handler(event,data)
 
 
@@ -90,19 +100,21 @@ async def enter(message,user_id,state,*,onboarding=True):
     clear_opening_question(user_id,opening_question(user_id))
     try:
         saved=await api("/dashboard",{"telegram_user_id":user_id});p=saved.get("profile",{})
-        text="🌿 Наставник по похудению\n\n"
+        text="Наставник ElixirPeptide\n\n"
         if p.get("current_weight_kg") is not None: text+=f"Последний вес: {fmt(p['current_weight_kg'])} кг.\n"
         if p.get("target_weight_kg") is not None: text+=f"Цель: {fmt(p['target_weight_kg'])} кг.\n"
         questions=[("goal","Какого результата по весу хотите достичь?"),("current_weight_kg","Сколько вы сейчас весите?"),
             ("height_cm","Какой у вас рост?"),("age","Сколько вам лет?"),("target_weight_kg","Какого веса хотите достичь?"),
             ("activity","Какая у вас обычно физическая активность?")]
-        question=next((q for field,q in questions if not p.get(field)),None) if onboarding else None
+        questions = [(field, q) for field, q in questions if field != "target_weight_kg" or p.get("goal") in {"weight_loss", "weight_gain"}]
+        question=next((q for field,q in questions if p.get(field) is None),None) if onboarding else None
         if question:
             text+="\n"+question;save_opening_question(user_id,question)
         else: text+="\nВыберите действие или просто напишите сообщение."
     except BridgeError:
-        text="🌿 Наставник по похудению\n\nПрофиль сейчас не загрузился. Можно продолжить разговор или попробовать открыть меню позже."
-    await message.answer(text,reply_markup=menu(),parse_mode=None)
+        saved = {}
+        text="Наставник ElixirPeptide\n\nПрофиль сейчас не загрузился. Можно продолжить разговор или попробовать открыть меню позже."
+    await message.answer(text,reply_markup=menu(saved.get("workspace", {}).get("sections")),parse_mode=None)
 
 
 @router.message(Command("mentor"))
@@ -116,11 +128,18 @@ async def ask(message,uid,text):
 
 
 def today_text(data):
-    if not data.get("meals"): return "Сегодня в дневнике ещё нет записанной еды. Нажмите «Добавить еду» и пришлите описание или фото."
-    t=data["totals"]
-    lines=[f"🍽 Сегодня · {data['date']}","",*[f"• {m['name']} — ≈ {fmt(m['kcal'])} ккал" for m in data["meals"][-12:]],"",
+    t=data.get("totals", {"kcal": 0, "protein": 0, "fat": 0, "carbs": 0})
+    lines=[f"🍽 Сегодня · {data.get('date', '')}","",*[f"• {m['name']} — ≈ {fmt(m['kcal'])} ккал" for m in data.get("meals", [])[-12:]],"",
         f"Итого: ≈ {fmt(t['kcal'])} ккал",f"Б {fmt(t['protein'])} г · Ж {fmt(t['fat'])} г · У {fmt(t['carbs'])} г",
         "Учитываются только записанные приёмы пищи. КБЖУ — приблизительная оценка."]
+    if not data.get("meals"):
+        lines.insert(2, "Сегодня в дневнике ещё нет записанной еды.")
+    remaining = data.get("workspace", {}).get("remaining")
+    if remaining:
+        labels = {"kcal": "ккал", "protein": "белка, г", "fat": "жиров, г", "carbs": "углеводов, г"}
+        lines.append("\nДо сохранённой нормы: " + "; ".join(f"{fmt(v)} {labels[k]}" for k, v in remaining.items()))
+    else:
+        lines.append("\nЧисловая норма не сохранена. Остаток не рассчитан.")
     return "\n".join(lines)
 
 
@@ -142,20 +161,16 @@ def history_text(data):
 
 
 def profile_text(p):
-    labels={"goal":"Цель","age":"Возраст","sex":"Пол","height_cm":"Рост, см","current_weight_kg":"Вес, кг",
+    labels={"goal":"Цель","goal_detail":"Подробности цели","age":"Возраст","sex":"Пол","height_cm":"Рост, см","current_weight_kg":"Вес, кг",
         "target_weight_kg":"Целевой вес, кг","activity":"Активность","preferences":"Предпочтения","restrictions":"Ограничения"}
-    values={"weight_loss":"снижение веса","maintain":"поддержание","weight_gain":"набор веса","male":"мужской","female":"женский"}
+    values={"weight_loss":"снижение веса","maintain":"поддержание","weight_gain":"набор веса","custom":"своя цель","male":"мужской","female":"женский"}
     lines=[f"{label}: {values.get(str(p[key]),p[key])}" for key,label in labels.items() if p.get(key) is not None]
     return "👤 Мои данные и цель\n\n"+("\n".join(lines)[:3400] if lines else "Профиль пока не заполнен.")+"\n\nЧто хотите изменить? Напишите новые данные обычным сообщением."
 
 
 async def show_reminders(message,uid):
-    data=await api("/dashboard",{"telegram_user_id":uid});settings=data['settings']
-    status=f"Каждый день в {settings['daily_time']}" if settings['daily_time'] else "Выключены"
-    text=f"🔔 Вечерний итог\n\n{status}\nЧасовой пояс: {settings['timezone']}\n\nВыберите время напоминания:"
-    kb=InlineKeyboardMarkup(inline_keyboard=[[button("19:00","remind:19:00"),button("20:00","remind:20:00"),button("21:00","remind:21:00")],
-        [button("Изменить часовой пояс","timezone")],[button("Выключить","remind:off")],[button("← Мой профиль","profile")]])
-    await message.answer(text,reply_markup=kb,parse_mode=None)
+    from .mentor_flows import reminders_view
+    return await reminders_view(message, uid)
 
 
 async def run_ai_action(query,state,professor_bot,professor_client,expert_client,text):
@@ -183,17 +198,19 @@ async def mentor_action(query:CallbackQuery,state:FSMContext,professor_bot=None,
         return await enter(query.message,uid,state,onboarding=action!="menu")
     if not mentor_enabled(uid):
         return await query.message.answer("Откройте наставника, чтобы продолжить.",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[button("🌿 Наставник по похудению","open")]]))
-    await state.clear();clear_opening_question(uid,opening_question(uid))
+    await state.set_state(None);clear_opening_question(uid,opening_question(uid))
     try:
+        from .mentor_flows import dispatch
+        if await dispatch(query, state, action, professor_bot, professor_client, expert_client): return
         if action in SECTIONS:
             return await query.message.answer(SECTIONS[action][0],reply_markup=section_keyboard(action),parse_mode=None)
-        if action=="meal": return await ask(query.message,uid,"Что вы ели? Пришлите описание, фото или голосовое. Для оценки укажите примерную порцию. Фото и голос доступны в режиме ИИ-профессора.")
+        if action=="meal": return await ask(query.message,uid,"Что вы ели? Пришлите текст, фото, голосовое или видеокружок с описанием порции. Медиа доступны в режиме ИИ-профессора.")
         if action=="weight": return await ask(query.message,uid,"Сколько вы сейчас весите, в килограммах?")
-        if action=="adjust": return await ask(query.message,uid,"Что в текущем плане неудобно или не получается?")
-        if action in {"today","history","data"}:
+        if action=="question": return await ask(query.message,uid,"Что хотите обсудить?")
+        if action in {"nutrition","history","data"}:
             data=await api("/dashboard",{"telegram_user_id":uid})
-            section={"today":"food","history":"progress","data":"profile"}[action]
-            text={"today":today_text,"history":history_text,"data":lambda d:profile_text(d['profile'])}[action](data)
+            section={"nutrition":"food","history":"progress","data":"profile"}[action]
+            text={"nutrition":today_text,"history":history_text,"data":lambda d:profile_text(d['profile'])}[action](data)
             if action=="data": save_opening_question(uid,"Какие данные профиля или цель хотите изменить?")
             return await query.message.answer(text,reply_markup=section_keyboard(section),parse_mode=None)
         if action in {"daily_plan","suggest"}:
@@ -230,7 +247,8 @@ async def timezone_input(message:Message,state:FSMContext):
     try:
         ZoneInfo(value)
         settings=(await api("/dashboard",{"telegram_user_id":message.from_user.id}))['settings']
-        await api("/reminder/settings",{"telegram_user_id":message.from_user.id,"timezone":value,"daily_time":settings['daily_time']})
+        from .mentor_flows import reminder_payload
+        await api("/reminder/options",{**reminder_payload(settings),"telegram_user_id":message.from_user.id,"timezone":value})
     except (ValueError,KeyError,BridgeError):
         return await message.answer("Не удалось сохранить часовой пояс. Проверьте название, например Europe/Moscow, и попробуйте снова.",reply_markup=back_keyboard())
     await state.clear();await show_reminders(message,message.from_user.id)
@@ -242,14 +260,26 @@ async def reminder_loop(bot):
             if configured():
                 result=await api("/reminder/due",{})
                 for item in result.get("items",[]):
+                    receipt = {k: item[k] for k in ("telegram_user_id", "delivery_id", "token")}
                     try:
-                        await bot.send_message(item['telegram_user_id'],"🌿 Как прошёл день? Можно подвести итог питания или обсудить, что получилось.",
-                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[button("Открыть наставника","open")]]))
+                        if not (await api("/reminder/check", {**receipt, "outcome": "sent"})).get("deliver"):
+                            continue
+                        if not reminder_was_delivered(item['telegram_user_id'], item['delivery_id']):
+                            await bot.send_message(item['telegram_user_id'],item['text'],
+                                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[button("Открыть наставника","open")]]))
+                            remember_delivery(item['telegram_user_id'], item['delivery_id'])
+                        await api("/reminder/ack", {**receipt, "outcome": "sent"})
+                        forget_delivery(item['telegram_user_id'], item['delivery_id'])
                     except TelegramForbiddenError:
-                        settings=(await api("/dashboard",item))['settings']
-                        await api("/reminder/settings",{**item,"timezone":settings['timezone'],"daily_time":None})
+                        await api("/reminder/ack", {**receipt, "outcome": "blocked"})
                     except Exception:
                         log.warning("Mentor reminder delivery failed")
+                        try: await api("/reminder/ack", {**receipt, "outcome": "retry"})
+                        except Exception: log.warning("Mentor reminder retry ACK failed; lease will expire")
         except Exception:
             log.warning("Mentor reminder poll failed")
         await asyncio.sleep(60)
+
+
+from .mentor_flows import router as flows_router
+router.include_router(flows_router)
