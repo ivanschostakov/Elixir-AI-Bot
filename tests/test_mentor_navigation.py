@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.methods import EditMessageMedia
+from aiogram.methods import EditMessageMedia, EditMessageText
 
 from src.ai import telegram_mentor as t
 from src.bot.handlers import mentor, mentor_flows as f
@@ -128,19 +128,91 @@ def test_weight_confirmation_keeps_values_and_consumes_review_buttons(monkeypatc
 
 
 @pytest.mark.parametrize("outcome,status", [("confirm", "confirmed"), ("cancel", "cancelled")])
-def test_ai_meal_review_only_changes_keyboard_not_the_answer(monkeypatch, outcome, status):
+def test_ai_meal_review_becomes_an_authoritative_receipt(monkeypatch, outcome, status):
     entry = {"id":42, "status":status, "name":"Рис", "kcal":150, "protein":3, "fat":1, "carbs":30}
     apis(monkeypatch, {"/journal/action":{"entry":entry}})
-    msg = message(text="Полный ответ ИИ с объяснением и оценкой еды.", markup=mentor.response_keyboard({"meal_draft":entry}))
+    msg = message(text="Оценил обычную порцию фри с кетчупом: ≈500 ккал. Это черновик. Кетчупа было примерно 1-2 пакетика?",
+        markup=mentor.response_keyboard({"meal_draft":entry}))
     state = State(pending_reviews=[entry])
     asyncio.run(mentor.mentor_action(query("meal_"+outcome+":42", msg), state))
     msg.answer.assert_not_awaited()
-    msg.edit_text.assert_not_awaited()
-    msg.edit_reply_markup.assert_awaited_once()
-    markup = msg.edit_reply_markup.await_args.kwargs["reply_markup"]
+    msg.edit_text.assert_awaited_once()
+    msg.edit_reply_markup.assert_not_awaited()
+    text = msg.edit_text.await_args.args[0]
+    assert "черновик" not in text.lower() and "пакетика" not in text
+    if outcome == "confirm":
+        assert "Записано в дневник: Рис" in text
+        assert "150 ккал" in text and "Белки: 3 г" in text
+    else:
+        assert text == "Оценка не записана в дневник."
+    markup = msg.edit_text.await_args.kwargs["reply_markup"]
     assert "mentor:receipt" in actions(markup)
     assert not any(a.startswith(("mentor:meal_confirm:", "mentor:meal_cancel:")) for a in actions(markup))
     assert state.values["pending_reviews"] == []
+
+
+def test_saved_meal_receipt_survives_a_failed_remaining_nutrition_read(monkeypatch):
+    entry = {"id":42, "status":"confirmed", "name":"Фри с кетчупом", "kcal":500, "protein":5, "fat":24, "carbs":66}
+    api = apis(monkeypatch, {"/journal/action":{"entry":entry}})
+    calls = 0
+    async def call(path, payload):
+        nonlocal calls
+        if path == "/dashboard":
+            calls += 1
+            if calls > 1:
+                raise t.BridgeError("Dashboard unavailable", status=503)
+            return dashboard()
+        return {"entry":entry}
+    api.side_effect = call
+    msg = message(text="Это черновик. Сохранить?")
+    state = State(pending_reviews=[entry])
+    asyncio.run(mentor.mentor_action(query("meal_confirm:42", msg), state))
+    assert "Записано в дневник" in msg.edit_text.await_args.args[0]
+    assert "500 ккал" in msg.edit_text.await_args.args[0]
+    assert state.values["pending_reviews"] == []
+
+
+def test_failed_meal_write_does_not_claim_that_food_was_saved(monkeypatch):
+    api = apis(monkeypatch)
+    async def call(path, payload):
+        if path == "/dashboard": return dashboard()
+        raise t.BridgeError("Сохранение временно недоступно", status=503)
+    api.side_effect = call
+    msg = message(text="Это черновик. Сохранить?")
+    entry = {"id":42, "status":"draft"}
+    state = State(pending_reviews=[entry])
+    asyncio.run(mentor.mentor_action(query("meal_confirm:42", msg), state))
+    assert state.values["pending_reviews"] == [entry]
+    assert "Записано в дневник" not in str(msg.edit_text.await_args_list)
+    assert "Записано в дневник" not in str(msg.answer.await_args_list)
+
+
+def test_photo_meal_review_replaces_caption_without_another_message(monkeypatch):
+    entry = {"id":42, "status":"confirmed", "name":"Рис", "kcal":150, "protein":3, "fat":1, "carbs":30}
+    apis(monkeypatch, {"/journal/action":{"entry":entry}})
+    msg = message(text=None)
+    msg.photo, msg.caption = [object()], "Черновик оценки еды. Проверьте порцию."
+    asyncio.run(mentor.mentor_action(query("meal_confirm:42", msg), State(pending_reviews=[entry])))
+    assert "Записано в дневник: Рис" in msg.edit_caption.await_args.kwargs["caption"]
+    assert "Черновик" not in msg.edit_caption.await_args.kwargs["caption"]
+    msg.answer.assert_not_awaited()
+
+
+@pytest.mark.parametrize("error,new_send", [("message to edit not found", True), ("message is not modified", False)])
+def test_meal_receipt_only_sends_a_replacement_for_an_uneditable_card(monkeypatch, error, new_send):
+    entry = {"id":42, "status":"confirmed", "name":"Рис", "kcal":150, "protein":3, "fat":1, "carbs":30}
+    apis(monkeypatch, {"/journal/action":{"entry":entry}})
+    msg = message(text="Это черновик.")
+    msg.edit_text.side_effect = TelegramBadRequest(method=EditMessageText(chat_id=123,
+        message_id=10, text="receipt"), message=error)
+    state = State(pending_reviews=[entry])
+    asyncio.run(mentor.mentor_action(query("meal_confirm:42", msg), state))
+    assert bool(msg.answer.await_count) is new_send
+    assert state.values["pending_reviews"] == []
+    assert state.values["mentor_panel"]["kind"] == "receipt"
+    if new_send:
+        assert "Записано в дневник" in msg.answer.await_args.args[0]
+        assert state.values["mentor_panel"]["message_id"] == msg.sent.message_id
 
 
 def test_structured_draft_confirmation_preserves_full_preview(monkeypatch):

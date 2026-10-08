@@ -315,12 +315,16 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
             text="Добавлено в дневник. Итоги за сегодня обновлены." if result['entry']['status']=='confirmed' else "Оценка не записана в дневник."
             if result['entry']['status']=='confirmed':
                 entry=result['entry']
-                text=f"Добавлено: {entry['name']}\n≈ {fmt(entry['kcal'])} ккал\nБелки: {fmt(entry['protein'])} г\nЖиры: {fmt(entry['fat'])} г\nУглеводы: {fmt(entry['carbs'])} г"
-                saved=await api("/dashboard", {"telegram_user_id":uid})
+                text=f"Записано в дневник: {entry['name']}\n≈ {fmt(entry['kcal'])} ккал\nБелки: {fmt(entry['protein'])} г\nЖиры: {fmt(entry['fat'])} г\nУглеводы: {fmt(entry['carbs'])} г"
+                try:
+                    saved=await api("/dashboard", {"telegram_user_id":uid})
+                except BridgeError:
+                    log.warning("Meal saved; remaining nutrition could not be loaded")
+                    saved={}
                 remaining=saved.get("workspace", {}).get("remaining") or {}
                 if remaining:
                     text+="\n\nОсталось: "+"; ".join(f"{fmt(remaining[k])} {unit}" for k,unit in [("kcal","ккал"),("protein","г белка")] if k in remaining)
-            return await message.complete(text,reply_markup=section_keyboard('food'))
+            return await message.complete(text,reply_markup=section_keyboard('food'),replace=True)
         if action=="reminders": return await show_reminders(message,uid)
         if action.startswith("remind:"):
             value=action.removeprefix("remind:")

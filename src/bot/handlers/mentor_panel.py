@@ -74,12 +74,23 @@ class MentorPanel:
     async def edit_reply_markup(self, **kwargs):
         return await self.message.edit_reply_markup(**kwargs)
 
-    async def complete(self, text, reply_markup=None):
-        # Preserve the reviewed values and any AI explanation; only consume its buttons.
+    async def complete(self, text, reply_markup=None, *, replace=False):
         rows = [[InlineKeyboardButton(text=text.splitlines()[0][:60], callback_data="mentor:receipt")]]
         if reply_markup:
             rows += reply_markup.inline_keyboard
         markup = InlineKeyboardMarkup(inline_keyboard=rows)
+        if replace:
+            try:
+                await edit_panel(self.message, text, markup)
+                receipt = self.message
+            except TelegramBadRequest as error:
+                if not missing_card(error):
+                    raise
+                receipt = await self.message.answer(text, reply_markup=markup, parse_mode=None)
+            self.completed = True
+            await remember_card(self.state, receipt, kind="receipt")
+            return
+        # Other reviews retain their full explanation and consume only the action buttons.
         saved = self.saved_card or {}
         if saved.get("message_id") == self.message.message_id and len(saved.get("pages", [])) > 1:
             pages = [{"text": p["text"], "rows": markup.model_dump(mode="json")["inline_keyboard"]}
