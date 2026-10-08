@@ -5,31 +5,32 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.ai import mentor_input as n
+from src.ai.mentor_copy import QUESTIONS
 from src.bot.handlers import mentor_flows as f
 from test_mentor_input import client_for, message
 from test_telegram_flows import State, dashboard
 
 
 @pytest.mark.parametrize("kind,data,context,expected", [
-    ("program", {}, {}, "В какой день тренируетесь?"),
-    ("program", {"exercises": [{"weekday": 0}]}, {}, "Какое упражнение делаете в этот день?"),
-    ("program", {"exercises": [{"weekday": 0, "name": "Присед"}]}, {}, "Сколько подходов в упражнении «Присед»?"),
-    ("program", {"exercises": [{"weekday": 0, "name": "Присед", "sets": 3}]}, {}, "Сколько повторений в каждом подходе «Присед»?"),
-    ("program", {"exercises": [{"weekday": 0, "name": "Присед", "sets": 3, "reps": 10}, {"name": "Жим"}]}, {}, "В какой день выполняете «Жим»?"),
-    ("workout_set", {}, {}, "Какое упражнение выполняли?"),
-    ("workout_set", {}, {"planned_exercise": "Присед"}, "С каким весом выполняли упражнение?"),
-    ("workout_set", {"exercise": "Присед", "weight_kg": 0}, {}, "Сколько повторений выполнили?"),
-    ("course_schedule", {}, {}, "Когда начинается курс по вашей схеме?"),
-    ("course_schedule", {"start_date": "2026-10-08"}, {}, "Когда заканчивается курс по вашей схеме?"),
+    ("program", {}, {}, "В какой день недели тренируетесь? Начнём с одного дня, остальные можно добавить дальше."),
+    ("program", {"exercises": [{"weekday": 0}]}, {}, "Какое упражнение делаете в этот день? Например, приседания или жим лёжа."),
+    ("program", {"exercises": [{"weekday": 0, "name": "Присед"}]}, {}, "Сколько подходов в упражнении «Присед»? Например, три подхода за тренировку."),
+    ("program", {"exercises": [{"weekday": 0, "name": "Присед", "sets": 3}]}, {}, "Сколько повторений в каждом подходе «Присед»? Например, по десять раз."),
+    ("program", {"exercises": [{"weekday": 0, "name": "Присед", "sets": 3, "reps": 10}, {"name": "Жим"}]}, {}, "В какой день выполняете «Жим»? Назовите день недели, например понедельник."),
+    ("workout_set", {}, {}, QUESTIONS["set_name"]),
+    ("workout_set", {}, {"planned_exercise": "Присед"}, QUESTIONS["set_weight"]),
+    ("workout_set", {"exercise": "Присед", "weight_kg": 0}, {}, QUESTIONS["set_reps"]),
+    ("course_schedule", {}, {}, QUESTIONS["course_schedule"]),
+    ("course_schedule", {"start_date": "2026-10-08"}, {}, "Когда заканчивается курс по вашей схеме? Назовите дату окончания, например 31 октября."),
     ("target", {"kcal": 2000, "protein": 100}, {}, "Сколько граммов жиров в вашей норме?"),
-    ("course_supply", {"supply_amount": 0, "supply_unit": "таблетка"}, {}, "Сколько из этого запаса уходит на один приём по вашей схеме?"),
-    ("reminder", {}, {"reminder_kind": "weekly"}, "В какой день недели присылать итоги?"),
+    ("course_supply", {"supply_amount": 0, "supply_unit": "таблетка"}, {}, "Сколько из этого запаса уходит на один приём по вашей схеме? Нужен расход в тех же единицах, что и запас; дозировку не пересчитываем."),
+    ("reminder", {}, {"reminder_kind": "weekly"}, QUESTIONS["reminder_weekly"]),
 ])
 def test_fallback_asks_only_the_next_missing_detail(kind, data, context, expected):
     question = n.followup(kind, data, context)
     assert question == expected
     assert question.count("?") == 1
-    assert len(question) <= 180
+    assert len(question) <= 350
 
 
 @pytest.mark.parametrize("question", [
@@ -40,7 +41,7 @@ def test_fallback_asks_only_the_next_missing_detail(kind, data, context, expecte
     "В какой день?\nСколько подходов?",
 ])
 def test_model_clarifications_cannot_become_another_form(question):
-    assert n.human_question("program", {"exercises": [{"weekday": 0, "name": "Присед"}]}, {}, question) == "Сколько подходов в упражнении «Присед»?"
+    assert n.human_question("program", {"exercises": [{"weekday": 0, "name": "Присед"}]}, {}, question) == "Сколько подходов в упражнении «Присед»? Например, три подхода за тренировку."
 
 
 def test_short_explanation_and_question_are_not_removed():
@@ -84,12 +85,12 @@ def test_partial_model_result_without_clarification_still_asks_instead_of_saving
 
 
 @pytest.mark.parametrize("action,prompt", [
-    ("target", "Какая у вас уже есть дневная норма калорий?"),
-    ("measurement", "Какие у вас сейчас замеры? Можно начать с талии."),
-    ("course", "Какое средство из вашей текущей схемы хотите записать?"),
-    ("custom_goal", "Чего хотите достичь?"),
+    ("target", QUESTIONS["target"]),
+    ("measurement", QUESTIONS["measurement"]),
+    ("course", QUESTIONS["course"]),
+    ("custom_goal", QUESTIONS["custom_goal"]),
 ])
-def test_initial_questions_are_short_without_changing_the_step(action, prompt):
+def test_initial_questions_explain_the_input_without_changing_the_step(action, prompt):
     msg, state = message(""), State()
     asyncio.run(f.start_form(msg, 123, state, action))
     assert msg.answer.await_args.args[0] == prompt

@@ -179,8 +179,11 @@ INSTRUCTIONS = """Разбери ответ человека на текущий
 Понимай разговорную речь, числа прописью, десятичную запятую, единицы и названия дней.
 Не угадывай отсутствующие значения, не назначай лечение, дозировки, программу или норму питания.
 Извлекай только явно сообщённое человеком. Не записывай примеры, отрицания, вопросы и чужие данные как его факты.
-Если ответ неполный, верни известные поля, остальные null, и один короткий уточняющий вопрос на русском.
-Уточнение — как реплика в обычном чате: одна недостающая деталь за раз, без перечня полей и канцелярита.
+Если ответ неполный, верни известные поля, остальные null, и один понятный уточняющий вопрос на русском.
+Уточнение - спокойная уважительная реплика для взрослого, незнакомого с ботом: одна недостающая деталь за раз.
+Не сокращай вопрос до непонятной фразы. Обычно достаточно 2-3 предложений: вопрос и, если нужно, единицы, короткое пояснение или пример ответа. Не повторяй инструкцию целиком на каждом шаге.
+Например, вместо «Сколько?» спроси «Сколько повторений выполнили в этом подходе? Например, десять раз. Считаем только этот подход, не всю тренировку».
+Не делай анкету или перечень полей, не требуй точного знания граммов еды. В clarification не предлагай фото, видео или голосовые: доступные способы уже указаны в вопросе бота и зависят от режима.
 Не больше одного вопроса и 350 символов в clarification. Не начинай с «Укажите», «Введите» или «Заполните».
 Учитывай всю историю answers: короткий ответ относится к последнему вопросу, известное не переспрашивай.
 Если человек сам рассказал несколько деталей, извлеки их все и не заставляй проходить их по очереди.
@@ -305,54 +308,47 @@ def required(data, key):
 
 
 def followup(kind, data, context):
-    if kind == "progress_photo": return "Пришлите фото прогресса."
-    if kind in {"program_name", "set_name"}: return "Какое упражнение добавим?"
-    if kind == "course": return "Какое средство из вашей схемы хотите записать?"
-    if kind == "course_dose": return "Какая дозировка указана в вашей схеме?"
-    if kind == "wellbeing_note": return "Что повлияло на самочувствие?"
-    if kind == "wellbeing_record": return "Как оцените самочувствие от одного до пяти?"
-    if kind == "custom_goal": return "Чего хотите достичь?"
-    if kind == "course_record": return "Что поправим в вашей схеме?"
+    from .mentor_copy import QUESTIONS, edit_question
+    if kind in {"progress_photo", "program_name", "set_name", "course", "course_dose", "wellbeing_note", "custom_goal"}:
+        return QUESTIONS[kind]
+    if kind == "wellbeing_record": return QUESTIONS["wellbeing_score"]
+    if kind == "course_record": return edit_question(kind)
     if kind == "reminder":
-        if context.get("reminder_kind") == "inactivity": return "Через сколько дней без записей напомнить?"
-        if context.get("reminder_kind") == "weekly" and data.get("weekday") is None: return "В какой день недели присылать итоги?"
-        return "Во сколько вам удобно? Уточните, утро это или вечер."
-    if kind == "course_reminder": return "Во сколько напоминать о курсе? Уточните, утро это или вечер."
-    if kind == "timezone": return "Уточните, пожалуйста, в каком городе и стране вы живёте?"
-    if kind == "weight": return "Сколько вы сейчас весите?"
+        if context.get("reminder_kind") == "inactivity": return QUESTIONS["reminder_inactivity"]
+        if context.get("reminder_kind") == "weekly" and data.get("weekday") is None: return QUESTIONS["reminder_weekly"]
+        return QUESTIONS["reminder_clock"]
+    if kind in {"course_reminder", "timezone", "weight"}: return QUESTIONS[kind]
     if kind == "target":
-        for key, question in (("kcal", "Какая у вас уже есть дневная норма калорий?"),
+        for key, question in (("kcal", QUESTIONS["target"]),
             ("protein", "Сколько граммов белка в вашей норме?"),
             ("fat", "Сколько граммов жиров в вашей норме?"), ("carbs", "Сколько граммов углеводов в вашей норме?")):
             if data.get(key) is None: return question
-    if kind == "measurement": return "Это замер талии, груди или бёдер?" if any(data.values()) else "Какой у вас сейчас обхват талии?"
+    if kind == "measurement": return "К какой части тела относится это значение: талии, груди или бёдрам? Например: талия 82 см. Остальные замеры добавлять необязательно." if any(data.values()) else QUESTIONS[kind]
     if kind == "program":
         exercises = data.get("exercises") or [{}]
         for exercise in exercises:
             name = exercise.get("name")
             if exercise.get("weekday") is None:
-                return f"В какой день выполняете «{name}»?" if name else "В какой день тренируетесь?"
-            if not name: return "Какое упражнение делаете в этот день?"
-            if exercise.get("sets") is None: return f"Сколько подходов в упражнении «{name}»?"
-            if exercise.get("reps") is None: return f"Сколько повторений в каждом подходе «{name}»?"
+                return f"В какой день выполняете «{name}»? Назовите день недели, например понедельник." if name else "В какой день недели тренируетесь? Начнём с одного дня, остальные можно добавить дальше."
+            if not name: return "Какое упражнение делаете в этот день? Например, приседания или жим лёжа."
+            if exercise.get("sets") is None: return f"Сколько подходов в упражнении «{name}»? Например, три подхода за тренировку."
+            if exercise.get("reps") is None: return f"Сколько повторений в каждом подходе «{name}»? Например, по десять раз."
         return "Что хотите уточнить в программе?"
     if kind == "workout_set":
-        if not (data.get("exercise") or context.get("planned_exercise")): return "Какое упражнение выполняли?"
-        if data.get("weight_kg") is None: return "С каким весом выполняли упражнение?"
-        return "Сколько повторений выполнили?"
+        if not (data.get("exercise") or context.get("planned_exercise")): return QUESTIONS["set_name"]
+        if data.get("weight_kg") is None: return QUESTIONS["set_weight"]
+        return QUESTIONS["set_reps"]
     if kind == "course_schedule":
-        for key, question in (("start_date", "Когда начинается курс по вашей схеме?"), ("end_date", "Когда заканчивается курс по вашей схеме?"),
-            ("times", "Во сколько запланирован приём по вашей схеме?")):
+        for key, question in (("start_date", QUESTIONS["course_schedule"]), ("end_date", "Когда заканчивается курс по вашей схеме? Назовите дату окончания, например 31 октября."),
+            ("times", "Во сколько запланирован приём по вашей схеме? Например, в девять утра. Если приёмов несколько, перечислите их время.")):
             if not data.get(key): return question
-        return "В какие дни или с каким интервалом запланированы приёмы по вашей схеме?"
+        return "В какие дни или с каким интервалом запланированы приёмы по вашей схеме? Например, по понедельникам и четвергам или раз в три дня. Переносим ваше существующее расписание."
     if kind == "course_supply":
-        for key, question in (("supply_amount", "Какой запас у вас сейчас есть?"),
-            ("amount_per_intake", "Сколько из этого запаса уходит на один приём по вашей схеме?"),
+        for key, question in (("supply_amount", QUESTIONS["course_supply"]),
+            ("amount_per_intake", "Сколько из этого запаса уходит на один приём по вашей схеме? Нужен расход в тех же единицах, что и запас; дозировку не пересчитываем."),
             ("supply_unit", "В чём считаем запас — в таблетках, миллилитрах или другой единице?")):
             if data.get(key) is None: return question
-    return {"program_sets":"Сколько подходов планируете?", "program_reps":"Сколько повторений в каждом подходе?",
-        "set_weight":"С каким весом выполняли упражнение?", "set_reps":"Сколько повторений выполнили?",
-        "workout_duration":"Сколько времени длилась тренировка?", "wellbeing_energy":"Сколько сейчас энергии — от одного до пяти?"}.get(kind, "Расскажите чуть подробнее, пожалуйста.")
+    return QUESTIONS.get(kind, "Расскажите чуть подробнее, пожалуйста.")
 
 
 def human_question(kind, data, context, question):

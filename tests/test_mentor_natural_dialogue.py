@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.ai import mentor_input as n, telegram_mentor as t
+from src.ai.mentor_copy import QUESTIONS
 from src.bot.handlers import mentor, mentor_flows as f
 from src.bot.handlers.mentor_insights import daily_insight, weekly_insight
 from test_mentor_input import client_for, message
@@ -126,7 +127,7 @@ def test_meal_edit_does_not_show_model_instructions(monkeypatch):
     query = SimpleNamespace(from_user=msg.from_user, message=msg, id="one")
     asyncio.run(f.dispatch(query, State(), "meal_edit:7", None, None, None))
     shown = msg.answer.await_args.args[0]
-    assert shown == "Что исправить в этом приёме пищи?"
+    assert shown == QUESTIONS["meal_edit"]
     assert "Сохрани остальные" not in shown
     assert "черновик еды №7" in t.opening_question(123)
 
@@ -175,8 +176,9 @@ def test_record_correction_seeds_the_owned_draft(monkeypatch):
     assert state.values["replace_id"] == 7
 
 
-def test_profile_copy_does_not_explain_how_to_type():
-    assert mentor.profile_text({}).endswith("Что изменилось?")
+def test_profile_copy_explains_the_next_step_without_typing_instructions():
+    assert "Какого результата" in mentor.profile_text({})
+    assert "текущий вес" in mentor.profile_text({"age":35})
     assert "обычным сообщением" not in mentor.profile_text({})
 
 

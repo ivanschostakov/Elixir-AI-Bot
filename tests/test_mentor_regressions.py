@@ -110,7 +110,8 @@ def test_target_preflight_happens_before_eligibility_and_activity(monkeypatch):
     monkeypatch.setattr(f, "api", api)
     msg = dispatch("target_auto")
     text = msg.answer.await_args.args[0]
-    assert text == "Какого результата хотите достичь?"
+    assert text.startswith("Какого результата хотите достичь:")
+    assert "снизить вес" in text and "ориентир питания" in text
     assert text.count("?") == 1
     buttons = [b.callback_data for r in msg.answer.await_args.kwargs["reply_markup"].inline_keyboard for b in r]
     assert "mentor:sex:male" in buttons and "mentor:target_activity" not in buttons

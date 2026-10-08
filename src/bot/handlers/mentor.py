@@ -13,6 +13,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramForbiddenError
 import config
+from src.ai.mentor_copy import QUESTIONS
 from src.ai.telegram_mentor import (BridgeError, configured, api, set_mentor_enabled,
     mentor_enabled, save_opening_question, clear_opening_question, opening_question,
     reminder_was_delivered, remember_delivery, forget_delivery)
@@ -188,8 +189,27 @@ def profile_text(p):
         "target_weight_kg":"Целевой вес, кг","activity":"Активность","preferences":"Предпочтения","restrictions":"Ограничения"}
     values={"weight_loss":"снижение веса","maintain":"поддержание","weight_gain":"набор веса","custom":"своя цель","male":"мужской","female":"женский"}
     lines=[f"{label}: {fmt(p[key]) if isinstance(p[key], (int, float)) else values.get(str(p[key]),p[key])}" for key,label in labels.items() if p.get(key) is not None]
+    filled = bool(lines)
     if p.get("sex") is None: lines.append("Пол: не указан")
-    return "👤 Мои данные и цель\n\n"+("\n".join(lines)[:3400] if lines else "Профиль пока не заполнен.")+"\n\nЧто изменилось?"
+    return "👤 Мои данные и цель\n\n"+("\n".join(lines)[:3400] if filled else "Профиль пока не заполнен.\nПол: не указан")+(
+        "\n\nЧто хотите добавить или изменить? Например, текущий вес, цель, привычную активность или ограничения в питании. "
+        "Можно рассказать только о том, что изменилось." if filled else
+        "\n\nКакого результата вы хотите достичь? Например, снизить вес, набрать его или поддерживать нынешний. "
+        "Начнём с цели, остальные детали уточню по ходу разговора.")
+
+
+async def meal_question(uid):
+    from .new_user_helpers import webapp_client, _resolve_last_used, _can_use_professor_mode, LAST_USED_PROFESSOR
+    text = QUESTIONS["meal"]
+    try:
+        user = await webapp_client.get_user("tg_id", uid)
+        mode, _ = _resolve_last_used(user)
+        if mode == LAST_USED_PROFESSOR and getattr(user, "tg_phone", None) and _can_use_professor_mode(user):
+            text += "\n\nМожно прислать фото еды, голосовое или кружочек с рассказом о приёме пищи. "
+            text += "Если по фото не видны состав или размер порции, уточню их перед оценкой."
+    except Exception:
+        log.warning("Could not resolve mentor meal input options")
+    return text
 
 
 async def show_reminders(message,uid):
@@ -267,16 +287,16 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
             saved = await api("/dashboard", {"telegram_user_id": uid}) if action == "ask" else {}
             return await message.answer(SECTIONS[action][0],reply_markup=section_keyboard(action, saved.get("profile")),parse_mode=None)
         if action=="meal" or action.startswith("meal:"):
-            return await ask(message,uid,"Что вы съели?")
+            return await ask(message,uid,await meal_question(uid))
         if action=="weight":
             from .mentor_flows import form
-            return await form(message, state, "weight", "Сколько вы сейчас весите?")
-        if action=="question": return await ask(message,uid,"Что хотите обсудить?")
+            return await form(message, state, "weight", QUESTIONS["weight"])
+        if action=="question": return await ask(message,uid,QUESTIONS["question"])
         if action in {"nutrition","history","data"}:
             data=await api("/dashboard",{"telegram_user_id":uid})
             section={"nutrition":"food","history":"progress","data":"profile"}[action]
             text={"nutrition":today_text,"history":history_text,"data":lambda d:profile_text(d['profile'])}[action](data)
-            if action=="data": save_opening_question(uid,"Какие данные профиля или цель хотите изменить?")
+            if action=="data": save_opening_question(uid,text)
             kb=section_keyboard(section)
             if action == "data":
                 kb.inline_keyboard.insert(0, [button("Мужской", "sex:male"), button("Женский", "sex:female")])
@@ -309,7 +329,7 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
             return await show_reminders(message,uid)
         if action=="timezone":
             from .mentor_flows import form
-            return await form(message, state, "timezone", "В каком городе вы живёте? Подстрою время напоминаний.")
+            return await form(message, state, "timezone", QUESTIONS["timezone"])
         await message.answer("Эта старая кнопка больше не используется. Выберите действие в меню.",reply_markup=menu())
     except (BridgeError,ValueError) as error:
         text=str(error) if isinstance(error,BridgeError) else "Не удалось обработать действие. Откройте меню и попробуйте снова."
@@ -319,7 +339,7 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
 @router.message(WeightInput.value)
 async def save_weight(message: Message, state: FSMContext, professor_client=None, professor_bot=None, expert_client=None):
     from .mentor_flows import receive
-    await state.update_data(form_kind="weight", form_prompt="Сколько вы сейчас весите?")
+    await state.update_data(form_kind="weight", form_prompt=QUESTIONS["weight"])
     await receive(message, state, professor_client, professor_bot, expert_client)
 
 
@@ -330,7 +350,7 @@ async def timezone_input(message:Message,state:FSMContext,professor_client=None,
 
 async def save_timezone(message,state,professor_client=None,professor_bot=None,expert_client=None):
     from .mentor_flows import receive
-    await state.update_data(form_kind="timezone", form_prompt="В каком городе вы живёте? Подстрою время напоминаний.")
+    await state.update_data(form_kind="timezone", form_prompt=QUESTIONS["timezone"])
     await receive(message, state, professor_client, professor_bot, expert_client)
 
 

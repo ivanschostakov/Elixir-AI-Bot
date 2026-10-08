@@ -223,7 +223,8 @@ def test_form_prompts_do_not_require_delimiters_or_technical_time_format(monkeyp
 @pytest.mark.parametrize("question", ["Укажите время HH:MM", "Введите ЧЧ:ММ", "Пришлите в формате JSON", "День | время", "Укажите IANA"])
 def test_model_cannot_reintroduce_technical_format_in_clarification(question):
     rendered=n.human_question("reminder",{"weekday":6},{"reminder_kind":"weekly"},question)
-    assert rendered == "Во сколько вам удобно? Уточните, утро это или вечер."
+    from src.ai.mentor_copy import QUESTIONS
+    assert rendered == QUESTIONS["reminder_clock"]
 
 
 def test_empty_photographic_answer_never_invokes_text_parser():
@@ -231,7 +232,7 @@ def test_empty_photographic_answer_never_invokes_text_parser():
     msg,state=message(""),State(form_kind="measurement",form_token="test")
     assert asyncio.run(n.parse_step(msg,state,"measurement",client)) is None
     client.responses.parse.assert_not_awaited()
-    assert "талии" in msg.answer.await_args.args[0]
+    assert "талия 82 см" in msg.answer.await_args.args[0]
     assert "текстом" not in msg.answer.await_args.args[0]
 
 
