@@ -145,9 +145,9 @@ def test_mentor_entry_uses_saved_profile_and_asks_one_question(monkeypatch):
     asyncio.run(mentor.enter(msg,456,SimpleNamespace(clear=AsyncMock())))
     assert t.mentor_enabled(456)
     text=msg.answer.await_args.args[0]
-    assert 'пол для расчёта КБЖУ' in text
+    assert 'вы мужчина или женщина?' in text
     assert 'Сколько вы сейчас весите?' not in text
-    assert t.opening_question(456)=='Укажите пол для расчёта КБЖУ: мужской или женский.'
+    assert t.opening_question(456)=='Для расчёта КБЖУ уточню: вы мужчина или женщина?'
     buttons=msg.answer.await_args.kwargs['reply_markup'].inline_keyboard
     assert [b.callback_data for row in buttons for b in row] == ['mentor:meal','mentor:today','mentor:food','mentor:workouts','mentor:course','mentor:progress','mentor:ask','mentor:profile','mentor:settings','mentor:leave']
 

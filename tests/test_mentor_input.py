@@ -223,7 +223,7 @@ def test_form_prompts_do_not_require_delimiters_or_technical_time_format(monkeyp
 @pytest.mark.parametrize("question", ["Укажите время HH:MM", "Введите ЧЧ:ММ", "Пришлите в формате JSON", "День | время", "Укажите IANA"])
 def test_model_cannot_reintroduce_technical_format_in_clarification(question):
     rendered=n.human_question("reminder",{"weekday":6},{"reminder_kind":"weekly"},question)
-    assert rendered == "Во сколько присылать напоминание? Уточните, пожалуйста, утро это или вечер."
+    assert rendered == "Во сколько вам удобно? Уточните, утро это или вечер."
 
 
 def test_empty_photographic_answer_never_invokes_text_parser():

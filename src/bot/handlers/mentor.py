@@ -120,12 +120,12 @@ async def enter(message,user_id,state,*,onboarding=True):
         from .mentor_flows import home_view
         text=home_view(saved)
         questions=[("goal","Какого результата по весу хотите достичь?"),("current_weight_kg","Сколько вы сейчас весите?"),
-            ("height_cm","Какой у вас рост?"),("age","Сколько вам лет?"),("sex","Укажите пол для расчёта КБЖУ: мужской или женский."),("target_weight_kg","Какого веса хотите достичь?"),
+            ("height_cm","Какой у вас рост?"),("age","Сколько вам лет?"),("sex","Для расчёта КБЖУ уточню: вы мужчина или женщина?"),("target_weight_kg","Какого веса хотите достичь?"),
             ("activity","Какая у вас обычно физическая активность?")]
         questions = [(field, q) for field, q in questions if field != "target_weight_kg" or p.get("goal") in {"weight_loss", "weight_gain"}]
         question=next((q for field,q in questions if p.get(field) is None),None) if onboarding else None
         if question:
-            text+="\n\nДозаполните профиль: "+question;save_opening_question(user_id,question)
+            text+="\n\n"+question;save_opening_question(user_id,question)
         else: text+="\nВыберите действие или просто напишите сообщение."
     except BridgeError:
         saved = {}
@@ -260,10 +260,10 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
             saved = await api("/dashboard", {"telegram_user_id": uid}) if action == "ask" else {}
             return await message.answer(SECTIONS[action][0],reply_markup=section_keyboard(action, saved.get("profile")),parse_mode=None)
         if action=="meal" or action.startswith("meal:"):
-            return await ask(message,uid,"Отправьте фотографию еды, голосовое сообщение, видеокружок или напишите, что вы съели. Например: «гречка 150 г, куриная грудка 200 г и овощной салат».\nДля кружка используйте кнопку видео в Telegram. Медиа доступны в режиме ИИ-профессора.")
+            return await ask(message,uid,"Что вы съели? Расскажите или пришлите фото, голосовое сообщение либо видеокружок. Медиа доступны в режиме ИИ-профессора.")
         if action=="weight":
             from .mentor_flows import form
-            return await form(message, state, "weight", "Сколько вы сейчас весите? Можно ответить своими словами.")
+            return await form(message, state, "weight", "Сколько вы сейчас весите?")
         if action=="question": return await ask(message,uid,"Что хотите обсудить?")
         if action in {"nutrition","history","data"}:
             data=await api("/dashboard",{"telegram_user_id":uid})
@@ -301,7 +301,7 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
             return await show_reminders(message,uid)
         if action=="timezone":
             from .mentor_flows import form
-            return await form(message, state, "timezone", "В каком городе или часовом поясе вы живёте? Это нужно для напоминаний.")
+            return await form(message, state, "timezone", "В каком городе вы живёте? Подстрою время напоминаний.")
         await message.answer("Эта старая кнопка больше не используется. Выберите действие в меню.",reply_markup=menu())
     except (BridgeError,ValueError) as error:
         text=str(error) if isinstance(error,BridgeError) else "Не удалось обработать действие. Откройте меню и попробуйте снова."
@@ -322,7 +322,7 @@ async def timezone_input(message:Message,state:FSMContext,professor_client=None)
 
 async def save_timezone(message,state,professor_client=None):
     from .mentor_flows import receive
-    await state.update_data(form_kind="timezone", form_prompt="В каком городе или часовом поясе вы живёте?")
+    await state.update_data(form_kind="timezone", form_prompt="В каком городе вы живёте? Подстрою время напоминаний.")
     await receive(message, state, professor_client)
 
 
