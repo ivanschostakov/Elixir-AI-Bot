@@ -139,10 +139,11 @@ def test_regular_provider_request_has_original_prompt_and_tools(monkeypatch, tmp
 
 def test_mentor_entry_uses_saved_profile_and_asks_one_question(monkeypatch):
     from src.bot.handlers import mentor
+    from test_telegram_flows import State
     monkeypatch.setattr(mentor,'configured',lambda:True)
     monkeypatch.setattr(mentor,'api',AsyncMock(return_value={'profile':{'goal':'weight_loss','age':19,'height_cm':183,'current_weight_kg':110,'target_weight_kg':90},'version':1}))
     msg=SimpleNamespace(answer=AsyncMock())
-    asyncio.run(mentor.enter(msg,456,SimpleNamespace(clear=AsyncMock())))
+    asyncio.run(mentor.enter(msg,456,State()))
     assert t.mentor_enabled(456)
     text=msg.answer.await_args.args[0]
     assert 'С чем хотите помочь себе сегодня?' in text
@@ -176,10 +177,11 @@ def test_menu_meal_confirmation_and_no_fabricated_progress():
 
 def test_menu_navigation_does_not_restart_onboarding(monkeypatch):
     from src.bot.handlers import mentor
+    from test_telegram_flows import State
     monkeypatch.setattr(mentor,'configured',lambda:True)
     monkeypatch.setattr(mentor,'api',AsyncMock(return_value={'profile':{},'version':0}))
     msg=SimpleNamespace(answer=AsyncMock())
-    asyncio.run(mentor.enter(msg,456,SimpleNamespace(clear=AsyncMock()),onboarding=False))
+    asyncio.run(mentor.enter(msg,456,State(),onboarding=False))
     assert '🌿 Наставник ElixirPeptide' in msg.answer.await_args.args[0]
     assert 'Выберите действие' not in msg.answer.await_args.args[0]
     assert t.opening_question(456) is None

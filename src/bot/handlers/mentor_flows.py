@@ -15,6 +15,7 @@ import config
 from src.ai.telegram_mentor import api, BridgeError, mentor_enabled
 from src.ai.mentor_input import MODELS, input_lock, parse_step, family, canonical, followup
 from .mentor_format import day, period, timezone_label, DAYS, GOALS, ACTIVITY
+from .mentor_panel import MentorPanel, ReplyCards, clear_input, complete_card
 
 router = Router(name="mentor_forms")
 
@@ -88,6 +89,8 @@ async def form(message, state, kind, prompt, *, rows=None, silent=False, **data)
         form_profile_version=previous.get("form_profile_version") if same else None,
         pending_input=None, **data)
     if not silent:
+        if isinstance(message, MentorPanel):
+            message.kind = "form"
         await message.answer(prompt, parse_mode=None, reply_markup=keyboard(*(rows or [[("Отмена", "menu")]])))
 
 
@@ -128,7 +131,9 @@ async def remember_response(state, response):
 async def pending_text(message, state, client=None, *, professor_bot=None, expert_client=None):
     """Only a literal user confirmation can execute an existing, owned preview."""
     async with input_lock(message.from_user.id):
-        return await pending_text_locked(message, state, client, professor_bot=professor_bot, expert_client=expert_client)
+        from .mentor_panel import reply_panel
+        return await pending_text_locked(await reply_panel(message, state), state, client,
+            professor_bot=professor_bot, expert_client=expert_client)
 
 
 async def pending_text_locked(message, state, client=None, *, professor_bot=None, expert_client=None):
@@ -155,7 +160,7 @@ async def pending_text_locked(message, state, client=None, *, professor_bot=None
     if values.get("pending_input"):
         pending = values["pending_input"]
         if no:
-            await state.clear()
+            await clear_input(state)
             await message.answer("Не сохраняю.", reply_markup=keyboard())
         elif yes:
             await confirm_input_locked(message, uid, state, "input_save:"+pending["token"])
@@ -249,7 +254,7 @@ async def make_draft(message, uid, state, kind, data, *, key=None):
     if saved.get("replace_kind") == kind:
         payload["replaces_id"] = saved.get("replace_id")
     result = await api("/workspace/draft", payload)
-    await state.clear()
+    await clear_input(state)
     await state.update_data(pending_reviews=[result["entry"]], text_confirmation_ready=True)
     await show_draft(message, result["entry"])
 
@@ -281,23 +286,26 @@ async def confirm_input_locked(message, uid, state, action):
     if kind == "weight":
         weight = payload.pop("weight")
         await api("/profile/update", {**payload, "patch": {"current_weight_kg": weight}})
-        await state.clear()
-        await message.answer(f"Вес {fmt(weight)} кг записан.", parse_mode=None,
+        await clear_input(state)
+        await complete_card(message, f"Вес {fmt(weight)} кг записан.", parse_mode=None,
             reply_markup=keyboard([("Последние измерения", "history")]))
     elif kind in {"reminder", "timezone"}:
         saved = await api("/dashboard", {"telegram_user_id": uid})
         await api("/reminder/options", {"telegram_user_id": uid,
             **reminder_payload(saved["settings"]), **pending["payload"]})
-        await state.clear()
+        await clear_input(state)
+        if isinstance(message, MentorPanel):
+            await complete_card(message, "Настройка сохранена.", reply_markup=keyboard([("Настройки напоминаний", "reminders")]))
+            return
         await reminders_view(message, uid)
     elif kind == "workout_duration":
         result = await api("/workspace/workout/finish", payload)
-        await state.clear()
-        await workout_result(message, result["entry"])
+        await clear_input(state)
+        await workout_result(message, result["entry"], completed=True)
     elif kind == "course_reminder":
         await api("/workspace/course/reminder", payload)
-        await state.clear()
-        await message.answer("Время напоминания сохранено. Схема и дозировка не менялись.", reply_markup=keyboard([("🧬 Мой курс", "course")], [("⏰ Включить напоминания", "reminders")]))
+        await clear_input(state)
+        await complete_card(message, "Время напоминания сохранено. Схема и дозировка не менялись.", reply_markup=keyboard([("🧬 Мой курс", "course")], [("⏰ Включить напоминания", "reminders")]))
 
 
 def wellbeing_prompt(values):
@@ -402,8 +410,8 @@ async def weight_chart(message, data):
     if image is None:
         await message.answer("Для графика нужны хотя бы два измерения веса.", reply_markup=keyboard([("⚖️ Добавить вес", "weight")]))
         return
-    await message.answer_photo(BufferedInputFile(image, filename="weight.png"), caption="Только ваши сохранённые измерения.", protect_content=True)
-    await message.answer("📈 График веса отправлен. Он построен по вашим сохранённым измерениям.", reply_markup=keyboard([("⚖️ Добавить вес", "weight")], [("📊 Прогресс", "progress")]))
+    await message.answer_photo(BufferedInputFile(image, filename="weight.png"), caption="Только ваши сохранённые измерения.", protect_content=True,
+        reply_markup=keyboard([("⚖️ Добавить вес", "weight")], [("📊 Прогресс", "progress")]))
 
 
 def weekly_view(data):
@@ -428,7 +436,7 @@ def weekly_view(data):
 
 async def library(message, uid, state, *, offset=0, favorites=False, query=""):
     result = await api("/workspace/meals", {"telegram_user_id": uid, "offset": offset, "query": query, "favorites_only": favorites})
-    await state.update_data(library_query=query, library_favorites=favorites)
+    await state.update_data(library_query=query, library_favorites=favorites, library_offset=offset)
     if not result["items"]:
         text = "Вы ещё не добавили любимые блюда. Нажмите «В избранное» в истории питания." if favorites else "Подходящих записей нет. Попробуйте другое название или добавьте еду."
         await message.answer(text, reply_markup=keyboard([("➕ Добавить еду", "meal")], [("📅 История питания", "meals:0")]))
@@ -551,8 +559,8 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         values=await state.get_data()
         if "pending_reminder_time" not in values: raise BridgeError("Откройте настройку времени заново.")
         await api("/workspace/course/reminder", {"telegram_user_id": uid, "entry_id": values["course_id"], "reminder_time": values["pending_reminder_time"]})
-        await state.clear()
-        await message.answer("Время напоминания сохранено. Схема и дозировка не менялись.", reply_markup=keyboard([("🧬 Мой курс", "course")], [("⏰ Включить напоминания", "reminders")]))
+        await clear_input(state)
+        await complete_card(message, "Время напоминания сохранено. Схема и дозировка не менялись.", reply_markup=keyboard([("🧬 Мой курс", "course")], [("⏰ Включить напоминания", "reminders")]))
     elif action == "reminder_reports_yes":
         values=reminder_payload(data["settings"])
         await api("/reminder/options", {"telegram_user_id": uid, **values, "detailed_reports": True})
@@ -659,8 +667,7 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         result = await api("/workspace/workout/set", {"telegram_user_id": uid, "entry_id": values["workout_id"],
             "request_key": values["set_request_key"], "exercise_set": values["pending_set"]})
         await state.update_data(pending_set=None, set_receipt=None)
-        await message.edit_reply_markup(reply_markup=None)
-        await message.answer(f"✅ Подход сохранён. Всего: {len(result['entry']['sets'])}.", reply_markup=keyboard(
+        await complete_card(message, f"✅ Подход сохранён. Всего: {len(result['entry']['sets'])}.", reply_markup=keyboard(
             [("➡️ Следующий подход / упражнение", "workout_start")], [("✅ Завершить тренировку", f"workout_finish:{values['workout_id']}")]))
     elif root == "set_edit":
         values = await state.get_data()
@@ -727,14 +734,13 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
     elif root == "course_event":
         _, outcome, entry_id = action.split(":")
         await api("/workspace/course/action", {"telegram_user_id": uid, "entry_id": int(entry_id), "action": outcome})
-        await message.answer("Отметка сохранена.", reply_markup=keyboard([("Мой курс", "course")]))
+        await dispatch(query, state, "course", professor_bot, professor_client, expert_client, panel=message)
     elif root == "course_stop":
         entry_id = int(action.split(":")[1])
         await message.answer("Остановить напоминания и будущие пункты этого расписания? Это не рекомендация прекращать лечение.", reply_markup=keyboard([("Остановить расписание", f"record:stop:{entry_id}"), ("Отмена", "course")]))
     elif root == "record":
         _, outcome, entry_id = action.split(":")
         result = await api("/workspace/action", {"telegram_user_id": uid, "entry_id": int(entry_id), "action": outcome})
-        await message.edit_reply_markup(reply_markup=keyboard())
         entry = result["entry"]
         await state.update_data(pending_reviews=[e for e in (await state.get_data()).get("pending_reviews", []) if e["id"] != entry["id"]])
         kind = entry.get("kind")
@@ -742,7 +748,7 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         if entry["status"] == "confirmed":
             text = {"target": f"Норма {fmt(entry.get('kcal'))} ккал сохранена.", "program": "Программа тренировок сохранена.",
                 "measurement": "Фото прогресса сохранено." if entry.get("photo_file_id") else "Замеры сохранены.", "wellbeing": "Самочувствие сохранено.", "course": "Существующая схема курса сохранена."}.get(kind, text)
-        await message.answer(text, reply_markup=keyboard([("Открыть результаты", {"target":"nutrition", "program":"workouts", "course":"course"}.get(kind, "progress"))]))
+        await complete_card(message, text, reply_markup=keyboard([("Открыть результаты", {"target":"nutrition", "program":"workouts", "course":"course"}.get(kind, "progress"))]))
     elif root == "record_edit":
         _, kind, entry_id = action.split(":")
         await state.update_data(replace_kind="measurement" if kind == "progress_photo" else kind, replace_id=int(entry_id))
@@ -788,7 +794,8 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         entry = next((m for m in w.get("measurements", []) if m["id"] == int(action.split(":")[1])), None)
         if not entry or not entry.get("photo_file_id"):
             raise BridgeError("Фото не найдено.")
-        await message.answer_photo(entry["photo_file_id"], caption="Личное фото прогресса", protect_content=True)
+        await message.answer_photo(entry["photo_file_id"], caption="Личное фото прогресса", protect_content=True,
+            reply_markup=keyboard([("← Фото и замеры", "measurements")]))
     elif action == "goals":
         goal = data.get("profile", {}).get("goal")
         await message.answer("Ваша цель\nСейчас: "+GOALS.get(goal, "не указана"), reply_markup=keyboard([("Снижение веса", "goal:weight_loss"), ("Набор веса", "goal:weight_gain")], [("Поддержание", "goal:maintain"), ("Своя цель", "custom_goal")], [("← Назад", "profile")]))
@@ -817,7 +824,9 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
     elif root == "favorite":
         _, entry_id, enabled = action.split(":")
         await api("/workspace/meals/favorite", {"telegram_user_id": uid, "entry_id": int(entry_id), "enabled": enabled == "1"})
-        await message.answer("Избранное обновлено.", reply_markup=section_keyboard("food"))
+        values = await state.get_data()
+        await library(message, uid, state, offset=values.get("library_offset", 0),
+            query=values.get("library_query", ""), favorites=values.get("library_favorites", False))
     elif action == "favorites":
         await library(message, uid, state, favorites=True)
     elif root == "meals":
@@ -874,7 +883,7 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         settings = reminder_payload(data["settings"])
         settings[values["reminder_kind"]] = None if action.endswith(":off") else action.removeprefix("reminder_clock:")
         await api("/reminder/options", {"telegram_user_id":uid, **settings})
-        await state.clear()
+        await clear_input(state)
         await reminders_view(message, uid)
     elif action == "adjust":
         await message.answer("Что нужно скорректировать?", reply_markup=keyboard(
@@ -900,11 +909,15 @@ async def repeat_meal(message, uid, callback_id, entry_id, response_keyboard, *,
     await message.answer(f"Повторить: {entry['name']} · ≈ {fmt(entry['kcal'])} ккал?", parse_mode=None, reply_markup=response_keyboard({"meal_draft": entry}))
 
 
-async def workout_result(message, entry):
+async def workout_result(message, entry, *, completed=False):
     volume = sum(s["weight_kg"]*s["reps"] for s in entry["sets"])
     from .mentor_insights import workout_insight
     duration = f"\nДлительность: {fmt(entry['duration_minutes'])} мин" if entry.get("duration_minutes") is not None else ""
-    await message.answer(f"✅ Тренировка завершена\nВыполнено {len(entry['sets'])} подходов\nОбщий объём: {fmt(volume)} кг"+duration+"\n\n"+workout_insight(entry), reply_markup=keyboard([("🏋️ Тренировки", "workouts")]))
+    text = f"✅ Тренировка завершена\nВыполнено {len(entry['sets'])} подходов\nОбщий объём: {fmt(volume)} кг"+duration+"\n\n"+workout_insight(entry)
+    if completed:
+        await complete_card(message, text, reply_markup=keyboard([("🏋️ Тренировки", "workouts")]))
+    else:
+        await message.answer(text, reply_markup=keyboard([("🏋️ Тренировки", "workouts")]))
 
 
 async def begin_set(message, state, entry, day, next_name):
@@ -975,14 +988,15 @@ async def receive_value(message, state, professor_client=None, *, normalized=Non
                 current = await state.get_data()
                 intent = current.get("form_intent")
                 if intent == "cancel":
-                    await state.clear()
+                    await clear_input(state)
                     await message.answer("Отменено. Ничего не записывал.", reply_markup=keyboard())
                 elif intent in {"pause", "unknown"}:
                     await state.update_data(form_paused=True, form_intent=None)
                     await message.answer("Хорошо, оставим это пока. Уже собранное осталось — вернёмся, когда будет удобно.", reply_markup=keyboard([("Отмена", "menu")]))
                 elif intent == "question":
                     await state.update_data(form_intent=None)
-                    await converse(original or message, state, professor_bot, professor_client, expert_client)
+                    await converse(original or (message.message if isinstance(message, ReplyCards) else message),
+                        state, professor_bot, professor_client, expert_client)
                 return
             values = await state.get_data()
         if kind == "weight":
@@ -1066,7 +1080,7 @@ async def receive_value(message, state, professor_client=None, *, normalized=Non
             if not text: raise ValueError()
             data = await api("/dashboard", {"telegram_user_id": uid})
             await api("/profile/update", {"telegram_user_id": uid, "expected_version": data["version"], "request_key": request_key(message), "source_text": text, "evidence": text, "patch": {"goal": "custom", "goal_detail": text}})
-            await state.clear()
+            await clear_input(state)
             await message.answer("Ваша цель сохранена.", reply_markup=keyboard([("Профиль", "profile")]))
         elif kind == "course":
             if not text or len(text) > 120: raise ValueError()
@@ -1141,7 +1155,7 @@ async def receive_value(message, state, professor_client=None, *, normalized=Non
             label = "выключить" if text == "-" else (f"{DAYS[settings['weekday']]} в {settings['weekly']}" if reminder == "weekly" else f"через {settings['inactivity_days']} дн." if reminder == "inactivity" else settings[reminder])
             await review_input(message, state, "reminder", change, "Напоминание: "+label+". Сохранить?")
         else:
-            await state.clear()
+            await clear_input(state)
             await message.answer("Откройте раздел заново.", reply_markup=keyboard())
     except (ValueError, KeyError, BridgeError) as error:
         detail = str(error) if isinstance(error, BridgeError) and error.status != 422 else "Не получилось сохранить запись. Уже собранные данные остались."

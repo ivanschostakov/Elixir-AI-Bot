@@ -113,7 +113,10 @@ def fmt(value):
 
 async def enter(message,user_id,state,*,onboarding=True):
     if not configured(): return await message.answer("Наставник пока недоступен. Попробуйте позже.")
-    await state.clear();set_mentor_enabled(user_id,True)
+    from .mentor_panel import MentorPanel, ReplyCards, clear_input
+    await clear_input(state);set_mentor_enabled(user_id,True)
+    if not isinstance(message, MentorPanel):
+        message = ReplyCards(message, state, kind="navigation")
     clear_opening_question(user_id,opening_question(user_id))
     try:
         saved=await api("/dashboard",{"telegram_user_id":user_id});p=saved.get("profile",{})
@@ -134,6 +137,9 @@ async def mentor_command(message:Message,state:FSMContext):
 
 
 async def ask(message,uid,text,*,context=None):
+    from .mentor_panel import MentorPanel
+    if isinstance(message, MentorPanel):
+        message.kind = "form"
     save_opening_question(uid,text+("\nСлужебный контекст: "+context if context else ""))
     await message.answer(text,reply_markup=back_keyboard(),parse_mode=None)
 
@@ -222,9 +228,13 @@ async def run_ai_action(query,state,professor_bot,professor_client,expert_client
 @router.callback_query(F.data.startswith("mentor:"))
 async def mentor_action(query:CallbackQuery,state:FSMContext,professor_bot=None,professor_client=None,expert_client=None):
     from .mentor_panel import MentorPanel, navigate_page
+    if query.data == "mentor:receipt":
+        return await query.answer("Это действие уже выполнено.")
     if query.data.startswith("mentor:page:"):
         return await navigate_page(query, state)
-    panel = MentorPanel(query.message, state, saved_card=(await state.get_data()).get("mentor_panel", {}))
+    saved = await state.get_data()
+    panel = MentorPanel(query.message, state, saved_card=saved.get("mentor_panel", {}),
+        cards=saved.get("mentor_cards", []), action=query.data.removeprefix("mentor:"))
     try:
         await perform_action(query, state, panel, professor_bot, professor_client, expert_client)
     finally:
@@ -290,7 +300,7 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
                 remaining=saved.get("workspace", {}).get("remaining") or {}
                 if remaining:
                     text+="\n\nОсталось: "+"; ".join(f"{fmt(remaining[k])} {unit}" for k,unit in [("kcal","ккал"),("protein","г белка")] if k in remaining)
-            return await message.answer(text,reply_markup=section_keyboard('food'))
+            return await message.complete(text,reply_markup=section_keyboard('food'))
         if action=="reminders": return await show_reminders(message,uid)
         if action.startswith("remind:"):
             value=action.removeprefix("remind:")

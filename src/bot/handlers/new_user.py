@@ -511,7 +511,9 @@ async def handle_new_chat(message: Message, state: FSMContext, professor_client,
 @professor_user_router.callback_query()
 async def handle_user_call(call: CallbackQuery, state: FSMContext):
     data = call.data.removeprefix("user:").split(":")
-    if data[0] == "about": return await about(call.message)
+    if data[0] == "about":
+        await call.answer()
+        return await call.message.edit_text(user_texts.about, reply_markup=user_keyboards.back)
     elif data[0] == "offer": return await offer(call.message)
     elif data[0] == "ai":
         if data[1] == "start": await call.message.edit_text(user_texts.pick_ai, reply_markup=user_keyboards.pick_ai)

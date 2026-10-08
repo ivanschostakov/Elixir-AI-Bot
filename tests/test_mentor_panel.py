@@ -131,7 +131,13 @@ def test_other_chat_cannot_reuse_card():
     msg = message()
     state = State()
     state.values = {"mentor_panel": {"message_id":4, "chat_id":999}}
-    assert asyncio.run(reply_panel(msg, state)) is None
+    async def run():
+        reply = await reply_panel(msg, state)
+        await reply.answer("Следующий вопрос")
+        msg.answer.assert_awaited_once()
+        msg.edit_text.assert_not_awaited()
+        msg.edit_caption.assert_not_awaited()
+    asyncio.run(run())
 
 
 def test_non_editable_message_error_is_not_silently_resent():
