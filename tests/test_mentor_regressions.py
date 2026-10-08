@@ -110,7 +110,8 @@ def test_target_preflight_happens_before_eligibility_and_activity(monkeypatch):
     monkeypatch.setattr(f, "api", api)
     msg = dispatch("target_auto")
     text = msg.answer.await_args.args[0]
-    assert "пол" in text and "рост" in text and "вес" in text
+    assert text == "Какого результата хотите достичь?"
+    assert text.count("?") == 1
     buttons = [b.callback_data for r in msg.answer.await_args.kwargs["reply_markup"].inline_keyboard for b in r]
     assert "mentor:sex:male" in buttons and "mentor:target_activity" not in buttons
     assert api.await_count == 1
@@ -141,6 +142,7 @@ def test_ai_target_uses_the_same_server_preview_and_returns_an_unconfirmed_draft
 
 def test_program_builder_and_stale_repetition_button(monkeypatch):
     monkeypatch.setattr(f, "api", AsyncMock(return_value=dashboard()))
+    monkeypatch.setattr(f, "parse_step", AsyncMock(return_value="Присед"))
     async def run():
         state, msg = State(program_exercises=[]), message("Присед")
         await f.dispatch(query("program_day:0",msg),state,"program_day:0",None,None,None)

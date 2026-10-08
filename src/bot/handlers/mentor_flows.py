@@ -1,5 +1,7 @@
 """Human-confirmed Telegram forms; model prose never stands in for persistence."""
 import asyncio
+import json
+import re
 import secrets
 from datetime import date, datetime, time
 from urllib.parse import urlsplit
@@ -11,7 +13,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 import config
 
 from src.ai.telegram_mentor import api, BridgeError, mentor_enabled
-from src.ai.mentor_input import MODELS, input_lock, parse_step
+from src.ai.mentor_input import MODELS, input_lock, parse_step, family, canonical, followup
 from .mentor_format import day, period, timezone_label, DAYS, GOALS, ACTIVITY
 
 router = Router(name="mentor_forms")
@@ -74,11 +76,136 @@ async def reminders_view(message, uid):
         [("Выключить все", "reminder:off"), ("Часовой пояс", "timezone")]))
 
 
-async def form(message, state, kind, prompt, **data):
+async def form(message, state, kind, prompt, *, rows=None, silent=False, **data):
+    previous = await state.get_data()
+    same = family(previous.get("form_kind")) == family(kind)
+    known = previous.get("form_known", {}) if same else {}
+    known = data.pop("known", known)
     await state.set_state(Input.value)
     await state.update_data(form_kind=kind, form_prompt=prompt, form_question=prompt,
-        form_answers=[], form_token=secrets.token_hex(8), form_profile_version=None, pending_input=None, **data)
-    await message.answer(prompt, parse_mode=None, reply_markup=keyboard([("Отмена", "menu")]))
+        form_answers=previous.get("form_answers", []) if same else [], form_known=known,
+        form_intent=None, form_paused=False, form_token=secrets.token_hex(8),
+        form_profile_version=previous.get("form_profile_version") if same else None,
+        pending_input=None, **data)
+    if not silent:
+        await message.answer(prompt, parse_mode=None, reply_markup=keyboard(*(rows or [[("Отмена", "menu")]])))
+
+
+async def next_step(message, state, kind, prompt, client=None, **data):
+    known = data.get("known", (await state.get_data()).get("form_known", {}))
+    try:
+        ready = canonical(kind, known, False, data)
+    except (ValueError, KeyError):
+        ready = None
+    await form(message, state, kind, prompt, silent=ready is not None, **data)
+    if ready is not None:
+        await receive_value(message, state, client, normalized=ready)
+
+
+async def converse(message, state, bot, professor_client, expert_client):
+    from .new_user import handle_single_ai_message
+    from src.ai.telegram_mentor import save_opening_question
+    values = await state.get_data()
+    save_opening_question(message.from_user.id, "Незавершённый шаг: "+values.get("form_question", "")+
+        "\nУже выяснено: "+json.dumps(values.get("form_known", {}), ensure_ascii=False)+
+        "\nСейчас человек задал вопрос. Ответь на него как наставник, без заполнения анкеты, без записи предположений. Шаг можно продолжить позже.")
+    return await handle_single_ai_message(message, state, bot, professor_client, expert_client, mentor_followup=True)
+
+
+async def remember_response(state, response):
+    entries = [response[k] for k in ("meal_draft", "target_draft", "program_draft") if response.get(k)]
+    if not entries:
+        await state.update_data(text_confirmation_ready=False)
+        return
+    previous = (await state.get_data()).get("pending_reviews", [])
+    replaced = response.get("replaced_review_ids", [])
+    merged = {e["id"]: e for e in previous if e.get("status", "draft") == "draft" and e["id"] not in replaced}
+    for entry in entries:
+        merged[entry["id"]] = entry
+    await state.update_data(pending_reviews=list(merged.values())[-10:], text_confirmation_ready=True)
+
+
+async def pending_text(message, state, client=None, *, professor_bot=None, expert_client=None):
+    """Only a literal user confirmation can execute an existing, owned preview."""
+    async with input_lock(message.from_user.id):
+        return await pending_text_locked(message, state, client, professor_bot=professor_bot, expert_client=expert_client)
+
+
+async def pending_text_locked(message, state, client=None, *, professor_bot=None, expert_client=None):
+    text = re.sub(r"\s+", " ", (message.text or "").casefold()).strip().rstrip(".! ")
+    yes = text in {"да", "да, сохрани", "да сохрани", "сохрани", "сохранить", "верно", "всё верно", "все верно", "подтверждаю"}
+    no = text in {"нет", "отмена", "не сохраняй", "не сохранять", "отмени"}
+    pause = text in {"позже", "не сейчас", "пока не знаю"}
+    correction = bool(re.match(r"^(?:нет[, ]|исправ|поправ|вместо|на самом деле)", text)) and not no
+    if not (yes or no or pause or correction):
+        await state.update_data(text_confirmation_ready=False)
+        return False
+    values = await state.get_data()
+    if not values.get("text_confirmation_ready", True): return False
+    reviews = values.get("pending_reviews", [])
+    count = bool(values.get("pending_input")) + bool(values.get("pending_set")) + len(reviews)
+    if not count: return False
+    if pause:
+        await message.answer("Хорошо, запись пока не сохраняю. К подтверждению можно вернуться позже.")
+        return True
+    if count != 1:
+        await message.answer("Какую запись вы имеете в виду? Подтвердите или исправьте её кнопкой под ней.")
+        return True
+    uid = message.from_user.id
+    if values.get("pending_input"):
+        pending = values["pending_input"]
+        if no:
+            await state.clear()
+            await message.answer("Не сохраняю.", reply_markup=keyboard())
+        elif yes:
+            await confirm_input_locked(message, uid, state, "input_save:"+pending["token"])
+        else:
+            await form(message, state, values["form_kind"], "Что поправим?", editing=True, silent=True)
+            await receive_value(message, state, client, professor_bot=professor_bot, expert_client=expert_client)
+        return True
+    if values.get("pending_set"):
+        if no:
+            await state.update_data(pending_set=None, set_receipt=None)
+            await message.answer("Этот подход не записываю.", reply_markup=keyboard([("Следующий подход", "workout_start")]))
+        elif yes:
+            await api("/workspace/workout/set", {"telegram_user_id":uid, "entry_id":values["workout_id"],
+                "request_key":values["set_request_key"], "exercise_set":values["pending_set"]})
+            await state.update_data(pending_set=None, set_receipt=None)
+            await message.answer("Подход записан.", reply_markup=keyboard([("Следующий подход", "workout_start")], [("Завершить тренировку", f"workout_finish:{values['workout_id']}")]))
+        else:
+            await form(message, state, "workout_set", "Что поправим в подходе?", known=values["pending_set"], editing=True, silent=True, pending_set=None)
+            await receive_value(message, state, client, professor_bot=professor_bot, expert_client=expert_client)
+        return True
+    entry = reviews[0]
+    if correction:
+        if await edit_record(message, uid, state, entry["id"], entry.get("kind", "meal"), silent=True):
+            await receive_value(message, state, client, professor_bot=professor_bot, expert_client=expert_client)
+        else:
+            return False
+        return True
+    path = "/journal/action" if entry.get("kind", "meal") == "meal" else "/workspace/action"
+    await api(path, {"telegram_user_id":uid, "entry_id":entry["id"], "action":"confirm" if yes else "cancel"})
+    await state.update_data(pending_reviews=[])
+    await message.answer("Записано: "+entry.get("name", {"measurement":"замеры", "wellbeing":"самочувствие", "target":"норма питания", "program":"программа"}.get(entry.get("kind"), "запись"))+"." if yes else "Не сохраняю.", reply_markup=keyboard())
+    return True
+
+
+async def edit_record(message, uid, state, entry_id, kind, *, silent=False):
+    entry = (await api("/workspace/record", {"telegram_user_id":uid, "entry_id":int(entry_id)}))["entry"]
+    if entry["status"] != "draft": raise BridgeError("Эта запись уже сохранена или отменена. Откройте её актуальные данные в разделе.")
+    edit_kind = {"wellbeing":"wellbeing_record", "course":"course_record", "progress_photo":"measurement"}.get(kind, kind)
+    if edit_kind == "meal":
+        from .mentor import ask
+        await ask(message, uid, "Что поправим в этом приёме пищи?", context=f"Исправь черновик еды №{entry_id}; сохрани неизменённые продукты. Нужен новый черновик и подтверждение.")
+        return False
+    if edit_kind not in MODELS: raise BridgeError("Для этой записи откройте её раздел.")
+    if kind == "progress_photo":
+        await form(message, state, "progress_photo", "Пришлите новое фото прогресса.",
+            editing=True, original_record=entry, replace_kind="measurement", replace_id=int(entry_id), silent=silent)
+        return True
+    await form(message, state, edit_kind, "Что поправим?", known={k:v for k,v in entry.items() if k in MODELS[edit_kind].model_fields},
+        editing=True, original_record=entry, course_data=entry if kind == "course" else {}, replace_kind=kind, replace_id=int(entry_id), silent=silent)
+    return True
 
 
 def draft_text(entry):
@@ -105,8 +232,8 @@ def draft_text(entry):
     return "Проверьте запись перед сохранением."
 
 
-async def show_draft(message, entry):
-    text = draft_text(entry)
+async def show_draft(message, entry, *, note=None):
+    text = (note+"\n\n" if note else "")+draft_text(entry)
     edit_kind = "progress_photo" if entry.get("photo_file_id") else entry["kind"]
     for start in range(0, len(text), 3500):
         await message.answer(text[start:start+3500], parse_mode=None,
@@ -123,45 +250,61 @@ async def make_draft(message, uid, state, kind, data, *, key=None):
         payload["replaces_id"] = saved.get("replace_id")
     result = await api("/workspace/draft", payload)
     await state.clear()
+    await state.update_data(pending_reviews=[result["entry"]], text_confirmation_ready=True)
     await show_draft(message, result["entry"])
 
 
 async def review_input(message, state, kind, payload, text):
     token = secrets.token_hex(8)
     await state.set_state(None)
-    await state.update_data(pending_input={"kind": kind, "payload": payload, "token": token})
+    await state.update_data(pending_input={"kind": kind, "payload": payload, "token": token}, text_confirmation_ready=True)
     await message.answer(text, parse_mode=None, reply_markup=keyboard(
         [("Да, сохранить", "input_save:"+token)], [("Исправить", "input_edit:"+token)]))
 
 
 async def confirm_input(message, uid, state, action):
-    root, token = action.split(":", 1)
     async with input_lock(uid):
-        values = dict(await state.get_data())
-        pending = values.get("pending_input")
-        if not pending or pending["token"] != token:
-            raise BridgeError("Эта запись уже обработана или заменена. Откройте нужный раздел заново.")
-        if root == "input_edit":
-            await form(message, state, values["form_kind"], values["form_prompt"])
-            return
-        payload = {"telegram_user_id": uid, **pending["payload"]}
-        kind = pending["kind"]
-        if kind == "weight":
-            weight = payload.pop("weight")
-            await api("/profile/update", {**payload, "patch": {"current_weight_kg": weight}})
-            await state.clear()
-            await message.answer(f"Вес {fmt(weight)} кг записан.", parse_mode=None,
-                reply_markup=keyboard([("Последние измерения", "history")]))
-        elif kind in {"reminder", "timezone"}:
-            saved = await api("/dashboard", {"telegram_user_id": uid})
-            await api("/reminder/options", {"telegram_user_id": uid,
-                **reminder_payload(saved["settings"]), **pending["payload"]})
-            await state.clear()
-            await reminders_view(message, uid)
-        elif kind == "workout_duration":
-            result = await api("/workspace/workout/finish", payload)
-            await state.clear()
-            await workout_result(message, result["entry"])
+        await confirm_input_locked(message, uid, state, action)
+
+
+async def confirm_input_locked(message, uid, state, action):
+    root, token = action.split(":", 1)
+    values = dict(await state.get_data())
+    pending = values.get("pending_input")
+    if not pending or pending["token"] != token:
+        raise BridgeError("Эта запись уже обработана или заменена. Откройте нужный раздел заново.")
+    if root == "input_edit":
+        await form(message, state, values["form_kind"], "Что поправим?", editing=True)
+        return
+    payload = {"telegram_user_id": uid, **pending["payload"]}
+    kind = pending["kind"]
+    if kind == "weight":
+        weight = payload.pop("weight")
+        await api("/profile/update", {**payload, "patch": {"current_weight_kg": weight}})
+        await state.clear()
+        await message.answer(f"Вес {fmt(weight)} кг записан.", parse_mode=None,
+            reply_markup=keyboard([("Последние измерения", "history")]))
+    elif kind in {"reminder", "timezone"}:
+        saved = await api("/dashboard", {"telegram_user_id": uid})
+        await api("/reminder/options", {"telegram_user_id": uid,
+            **reminder_payload(saved["settings"]), **pending["payload"]})
+        await state.clear()
+        await reminders_view(message, uid)
+    elif kind == "workout_duration":
+        result = await api("/workspace/workout/finish", payload)
+        await state.clear()
+        await workout_result(message, result["entry"])
+    elif kind == "course_reminder":
+        await api("/workspace/course/reminder", payload)
+        await state.clear()
+        await message.answer("Время напоминания сохранено. Схема и дозировка не менялись.", reply_markup=keyboard([("🧬 Мой курс", "course")], [("⏰ Включить напоминания", "reminders")]))
+
+
+def wellbeing_prompt(values):
+    text = "Что повлияло на самочувствие?"
+    if values.get("score", 5) <= 2 or values.get("energy_score", 5) is not None and values.get("energy_score", 5) <= 1:
+        text += " Если состояние резко ухудшилось или симптомы сильные, обратитесь за медицинской помощью."
+    return text
 
 
 
@@ -277,8 +420,9 @@ def weekly_view(data):
         f"Объём (вес × повторы): {fmt(w.get('volume_kg'))} кг",
         f"Курс: выполнено {w.get('course_done', 0)} из {w.get('course_due', 0)} запланированных приёмов",
         "", "Показаны только сохранённые записи. Отсутствие записи не означает ноль или пропуск питания.",
-        "Продолжайте регулярные записи для сравнения." if w.get('nutrition_days', 0) < 3 else
-        "Сравнивайте недельные средние, а не отдельные колебания веса. Схему курса согласовывайте со специалистом."]
+        ]
+    from .mentor_insights import weekly_insight
+    lines.append(weekly_insight(data))
     return "\n".join(line for line in lines if "нет данных" not in line)
 
 
@@ -301,14 +445,14 @@ async def start_form(message, uid, state, action, *, editing=False):
     if action == "program":
         if not editing:
             await state.update_data(replace_kind=None, replace_id=None)
-        await state.update_data(program_exercises=[])
+        await state.update_data(program_exercises=[], form_kind=None, form_known={})
         await message.answer("Как собрать программу тренировок?", reply_markup=keyboard(
             [("📅 Собрать по шагам", "program_day")], [("✨ Собрать программу за меня", "program_ai")],
             [("✍️ Ввести готовую программу", "program_text")]))
         return True
     prompts = {
         "target": "Какая у вас уже есть дневная норма калорий?",
-        "program": "Расскажите о вашей программе тренировок.",
+        "program": "Какая у вас программа тренировок?",
         "measurement": "Какие у вас сейчас замеры? Можно начать с талии.",
         "progress_photo": "Пришлите фото прогресса. Сохраню его только после вашего подтверждения, без публичной ссылки.",
         "meal_search": "Какое блюдо найти в вашем дневнике?",
@@ -318,7 +462,7 @@ async def start_form(message, uid, state, action, *, editing=False):
     if action not in prompts:
         return False
     if not editing:
-        await state.update_data(replace_kind=None, replace_id=None)
+        await state.update_data(replace_kind=None, replace_id=None, form_kind=None, form_known={}, editing=False)
     await form(message, state, action, prompts[action])
     return True
 
@@ -353,8 +497,8 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         await confirm_input(message, uid, state, action)
     elif action == "food_lookup":
         from src.ai.telegram_mentor import save_opening_question
-        save_opening_question(uid, "Оцени КБЖУ указанного продукта и порции. Если порция не указана, уточни её. Создай только черновик; запись в дневник после подтверждения.")
-        await message.answer("Что вы съели? Расскажите или пришлите фото. Оценю КБЖУ примерно, а перед записью попрошу подтвердить.", reply_markup=keyboard([("Найти среди моих записей", "meal_search")]))
+        save_opening_question(uid, "Справочный поиск продукта: дай приблизительную оценку КБЖУ, уточнив порцию при необходимости. Не создавай запись или черновик съеденной еды, пока человек явно не сообщил, что уже съел её.")
+        await message.answer("Какой продукт хотите найти?", reply_markup=keyboard([("Найти среди моих записей", "meal_search")]))
     elif action == "target":
         await message.answer("Дневная норма КБЖУ\nМожно рассчитать стартовый ориентир по профилю или ввести свою согласованную норму.",
             reply_markup=keyboard([("Рассчитать по профилю", "target_auto")], [("Ввести вручную", "target_manual")]))
@@ -367,7 +511,11 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
             rows = [[("👤 Заполнить профиль", "data")]]
             if data.get("profile", {}).get("sex") is None:
                 rows.insert(0, [("Мужской", "sex:male"), ("Женский", "sex:female")])
-            await message.answer("Для расчёта сначала укажите: "+", ".join(missing)+".", reply_markup=keyboard(*rows))
+            questions = {"цель":"Какого результата хотите достичь?", "возраст":"Сколько вам лет?", "пол":"Для расчёта уточню: вы мужчина или женщина?", "рост":"Какой у вас рост?", "вес":"Сколько вы сейчас весите?"}
+            from src.ai.telegram_mentor import save_opening_question
+            question = questions[missing[0]]
+            save_opening_question(uid, question+"\nЧеловек собирает профиль для расчёта нормы. Сохрани только явно названные факты текущего ответа и уточни следующую недостающую деталь, если нужна. Для расчёта используй preview_mentor_nutrition с существующими ограничениями.")
+            await message.answer(question, reply_markup=keyboard(*rows, [("Продолжить расчёт", "target_auto")]))
         else:
             await message.answer("Расчёт предназначен для взрослых без беременности, грудного вскармливания, РПП и необходимости лечебного питания. Это стартовый ориентир, не медицинское назначение. Подтверждаете, что эти ограничения к вам не относятся?",
                 reply_markup=keyboard([("Да, выбрать активность", "target_activity")], [("Нет / не уверен: ввести норму специалиста", "target_ineligible")]))
@@ -376,7 +524,7 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         await start_form(message, uid, state, "target")
     elif action == "target_activity":
         await api("/workspace/nutrition/eligibility", {"telegram_user_id": uid, "confirmed": True})
-        await message.answer("Выберите вашу обычную активность для расчёта:", reply_markup=keyboard(
+        await message.answer("Насколько активен ваш обычный день?", reply_markup=keyboard(
             *[[(label, "target_activity:"+key)] for key, label in ACTIVITY.items()]))
     elif root == "target_activity":
         activity = action.split(":")[1]
@@ -393,8 +541,8 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         else:
             result_draft=await api("/workspace/draft", {"telegram_user_id": uid, "request_key": "nutrition:"+query.id,
                 "kind": "target", "data": {**{k:float(v) for k,v in result["nutrition"].items()}, "source": "user"}})
-            await message.answer(result["note"], parse_mode=None)
-            await show_draft(message, result_draft["entry"])
+            await remember_response(state, {"target_draft":result_draft["entry"]})
+            await show_draft(message, result_draft["entry"], note=result["note"])
     elif root == "course_reminder":
         course=next((c for c in w.get("courses", []) if c["id"] == int(action.split(":")[1])), None)
         if not course: raise BridgeError("Курс не найден.")
@@ -444,37 +592,40 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         await run_ai_action(query, state, professor_bot, professor_client, expert_client,
             "Проанализируй мой сегодняшний день по сохранённым питанию, весу, тренировкам и самочувствию. Учитывай остаток КБЖУ и любимые блюда. Не придумывай отсутствующие записи. Дозировки не меняй.")
     elif action == "workout_results":
-        await message.answer(weekly_view(data), parse_mode=None, reply_markup=keyboard([("🏋️ Тренировки", "workouts")]))
+        week = w.get("weekly", {})
+        lines = ["Результаты тренировок за неделю", f"Записано тренировок: {week.get('workouts', 0)}",
+            f"По программе: {week.get('planned_workouts', 0)}", f"Длительность: {fmt(week.get('duration_minutes'))} мин",
+            f"Объём: {fmt(week.get('volume_kg'))} кг", "",
+            "Для сравнения прогресса записывайте вес и повторы в тех же упражнениях. Общий объём сам по себе не показывает рост силы."
+            if week.get("workouts") else "Пока нет записанных тренировок. После следующей тренировки сохраните подходы — будет с чем сравнивать."]
+        await message.answer("\n".join(lines), parse_mode=None, reply_markup=keyboard([("🏋️ Тренировки", "workouts")]))
     elif action == "program_ai":
         await run_ai_action(query, state, professor_bot, professor_client, expert_client,
             "Помоги составить недельную программу тренировок по моему профилю. Уточни ограничения и опыт, если они неизвестны. "
             "Покажи упражнения, дни недели, подходы и повторы. Используй draft_mentor_program для черновика; не утверждай, что программа сохранена без подтверждения кнопкой.")
     elif action == "program_text":
-        await form(message, state, "program", "Расскажите о вашей программе тренировок. Можно прислать её текст.")
+        await form(message, state, "program", "Какая у вас программа тренировок?")
     elif action == "program_day":
         await message.answer("В какой день будет упражнение?", reply_markup=keyboard(*[[(label, f"program_day:{i}")] for i, label in enumerate(DAYS)]))
     elif root == "program_day":
         weekday = int(action.split(":")[1])
         if weekday not in range(7): raise BridgeError("Выберите день недели.")
-        await form(message, state, "program_name", f"{DAYS[weekday]}: какое упражнение добавим?", program_weekday=weekday)
+        await state.update_data(form_kind=None, form_known={})
+        await form(message, state, "program_name", f"{DAYS[weekday]}: какое упражнение добавим?", program_weekday=weekday, known={"weekday":weekday})
     elif root == "program_sets":
         if (await state.get_data()).get("form_kind") != "program_sets":
             raise BridgeError("Эта кнопка устарела. Продолжите текущий шаг конструктора.")
         sets = int(action.split(":")[1])
         if not 1 <= sets <= 30: raise BridgeError("Число подходов: от 1 до 30.")
-        await state.update_data(program_sets=sets)
-        await form(message, state, "program_reps", "Сколько повторений в каждом подходе?")
-        await message.answer("Можно выбрать кнопкой или ответить своими словами.", reply_markup=keyboard([(str(i), f"program_reps:{i}") for i in (6, 8, 10, 12, 15)]))
+        await state.update_data(program_sets=sets, form_known={**(await state.get_data()).get("form_known", {}), "sets":sets})
+        await next_step(message, state, "program_reps", "Сколько повторений в каждом подходе?", professor_client,
+            rows=[[(str(i), f"program_reps:{i}") for i in (6, 8, 10, 12, 15)]])
     elif root == "program_reps":
         await append_program_exercise(message, state, int(action.split(":")[1]))
     elif action == "program_done":
         values = await state.get_data()
         if not values.get("program_exercises"): raise BridgeError("Сначала добавьте упражнение.")
-        result = await api("/workspace/draft", {"telegram_user_id": uid, "request_key": "program:"+query.id,
-            "kind": "program", "data": {"exercises": values["program_exercises"]},
-            **({"replaces_id": values["replace_id"]} if values.get("replace_kind") == "program" else {})})
-        await state.clear()
-        await show_draft(message, result["entry"])
+        await make_draft(message, uid, state, "program", {"exercises": values["program_exercises"]}, key="program:"+query.id)
     elif action in {"workouts", "workout_plan"}:
         program = w.get("program")
         text = draft_text(program) if program else "Программа на неделю пока не сохранена."
@@ -515,7 +666,7 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         values = await state.get_data()
         if action.split(":", 1)[1] != values.get("set_receipt"):
             raise BridgeError("Откройте текущую тренировку.")
-        await form(message, state, "set_weight", "С каким весом выполняли упражнение? Можно сказать «без веса».", pending_set=None)
+        await form(message, state, "workout_set", "Что поправим в подходе?", known=values.get("pending_set") or {}, editing=True, pending_set=None)
     elif root == "workout_finish":
         result = await api("/workspace/workout/finish", {"telegram_user_id": uid, "entry_id": int(action.split(":")[1])})
         await workout_result(message, result["entry"])
@@ -585,6 +736,7 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         result = await api("/workspace/action", {"telegram_user_id": uid, "entry_id": int(entry_id), "action": outcome})
         await message.edit_reply_markup(reply_markup=keyboard())
         entry = result["entry"]
+        await state.update_data(pending_reviews=[e for e in (await state.get_data()).get("pending_reviews", []) if e["id"] != entry["id"]])
         kind = entry.get("kind")
         text = {"confirmed": "Запись сохранена.", "cancelled": "Черновик отменён.", "stopped": "Расписание остановлено. История сохранена."}[entry["status"]]
         if entry["status"] == "confirmed":
@@ -594,10 +746,7 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
     elif root == "record_edit":
         _, kind, entry_id = action.split(":")
         await state.update_data(replace_kind="measurement" if kind == "progress_photo" else kind, replace_id=int(entry_id))
-        if kind == "wellbeing":
-            await message.answer("Самочувствие: 1 — очень плохо, 5 — хорошо.", reply_markup=keyboard([(str(i), f"wellbeing:{i}") for i in range(1, 6)]))
-        elif not await start_form(message, uid, state, kind, editing=True):
-            raise BridgeError("Этот тип записи нельзя исправить из старой кнопки.")
+        await edit_record(message, uid, state, entry_id, kind)
     elif action == "course_new":
         await start_form(message, uid, state, "course")
     elif root == "course_source":
@@ -607,20 +756,23 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
             raise BridgeError("Начните добавление схемы заново.")
         course["source"] = action.split(":")[1]
         course["timezone"] = data["settings"]["timezone"]
-        await form(message, state, "course_schedule", "Когда начинается курс по вашей схеме?", course_data=course)
+        await next_step(message, state, "course_schedule", "Когда начинается курс по вашей схеме?", professor_client, course_data=course)
     elif action == "wellbeing":
         await state.update_data(replace_kind=None, replace_id=None)
-        await message.answer("Как ваше самочувствие? 1 — очень плохо, 5 — хорошо.", reply_markup=keyboard([(str(i), f"wellbeing:{i}") for i in range(1, 6)]))
+        await form(message, state, "wellbeing_score", "Как ваше самочувствие? 1 — очень плохо, 5 — хорошо.",
+            known={}, rows=[[(str(i), f"wellbeing:{i}") for i in range(1, 6)]])
     elif root == "wellbeing":
-        await form(message, state, "wellbeing_energy", "Сколько сейчас энергии — от одного до пяти?", score=int(action.split(":")[1]))
-        await message.answer("Выберите оценку энергии:", reply_markup=keyboard([(str(i), f"energy:{i}") for i in range(1, 6)], [("Пропустить", "energy:skip")]))
+        await form(message, state, "wellbeing_energy", "Сколько сейчас энергии — от одного до пяти?", score=int(action.split(":")[1]),
+            known={"score":int(action.split(":")[1])},
+            rows=[[(str(i), f"energy:{i}") for i in range(1, 6)], [("Пропустить", "energy:skip")]])
     elif root == "energy":
         if (await state.get_data()).get("form_kind") != "wellbeing_energy":
             raise BridgeError("Выберите самочувствие заново.")
         energy = None if action.endswith(":skip") else int(action.split(":")[1])
         if energy is not None and energy not in range(1, 6): raise BridgeError("Оценка должна быть от 1 до 5.")
-        await form(message, state, "wellbeing_note", "Как вы себя чувствуете? Если вам сильно хуже, обратитесь за медицинской помощью.", energy_score=energy)
-        await message.answer("Заметку можно не добавлять.", reply_markup=keyboard([("Пропустить", "wellbeing_skip")]))
+        await next_step(message, state, "wellbeing_note", wellbeing_prompt({**(await state.get_data()), "energy_score":energy}), professor_client, energy_score=energy,
+            known={**(await state.get_data()).get("form_known", {}), "energy_score":energy},
+            rows=[[("Пропустить", "wellbeing_skip")]])
     elif action == "wellbeing_skip":
         values = await state.get_data()
         if values.get("form_kind") != "wellbeing_note" or "score" not in values: raise BridgeError("Начните оценку самочувствия заново.")
@@ -653,15 +805,15 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         await message.answer(profile_text(result["profile"]), parse_mode=None, reply_markup=section_keyboard("profile"))
     elif root in {"meal_edit", "meal_add"}:
         prompt = "Какой продукт добавить" if root == "meal_add" else "Что исправить"
-        await ask(message, uid, f"{prompt} в оценке еды №{int(action.split(':')[1])}? Укажите состав или порцию. Сохрани остальные продукты и замени этот черновик новым. Запись в дневник только после подтверждения.")
+        await ask(message, uid, f"{prompt} в этом приёме пищи?", context=f"Исправляется черновик еды №{int(action.split(':')[1])}. Сохрани остальные продукты и замени этот черновик новым. Запись только после подтверждения.")
     elif action == "repeat_previous":
         result = await api("/workspace/meals", {"telegram_user_id": uid})
         if not result["items"]:
             await message.answer("Записанной еды пока нет.", reply_markup=section_keyboard("food"))
         else:
-            await repeat_meal(message, uid, query.id, result["items"][0]["id"], response_keyboard)
+            await repeat_meal(message, uid, query.id, result["items"][0]["id"], response_keyboard, state=state)
     elif root == "repeat":
-        await repeat_meal(message, uid, query.id, int(action.split(":")[1]), response_keyboard)
+        await repeat_meal(message, uid, query.id, int(action.split(":")[1]), response_keyboard, state=state)
     elif root == "favorite":
         _, entry_id, enabled = action.split(":")
         await api("/workspace/meals/favorite", {"telegram_user_id": uid, "entry_id": int(entry_id), "enabled": enabled == "1"})
@@ -740,21 +892,26 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
     return True
 
 
-async def repeat_meal(message, uid, callback_id, entry_id, response_keyboard):
+async def repeat_meal(message, uid, callback_id, entry_id, response_keyboard, *, state=None):
     result = await api("/workspace/meals/repeat", {"telegram_user_id": uid, "entry_id": entry_id, "request_key": "repeat:"+callback_id})
     entry = result["entry"]
+    if state is not None:
+        await remember_response(state, {"meal_draft":entry})
     await message.answer(f"Повторить: {entry['name']} · ≈ {fmt(entry['kcal'])} ккал?", parse_mode=None, reply_markup=response_keyboard({"meal_draft": entry}))
 
 
 async def workout_result(message, entry):
     volume = sum(s["weight_kg"]*s["reps"] for s in entry["sets"])
-    await message.answer(f"✅ Тренировка завершена\nВыполнено {len(entry['sets'])} подходов\nОбщий объём: {fmt(volume)} кг\nДлительность: {fmt(entry['duration_minutes'])} мин", reply_markup=keyboard([("🏋️ Тренировки", "workouts")]))
+    from .mentor_insights import workout_insight
+    duration = f"\nДлительность: {fmt(entry['duration_minutes'])} мин" if entry.get("duration_minutes") is not None else ""
+    await message.answer(f"✅ Тренировка завершена\nВыполнено {len(entry['sets'])} подходов\nОбщий объём: {fmt(volume)} кг"+duration+"\n\n"+workout_insight(entry), reply_markup=keyboard([("🏋️ Тренировки", "workouts")]))
 
 
 async def begin_set(message, state, entry, day, next_name):
-    await state.update_data(workout_id=entry["id"], program_day=day, planned_exercise=next_name, pending_set=None, set_receipt=None)
+    await state.update_data(workout_id=entry["id"], program_day=day, planned_exercise=next_name, pending_set=None, set_receipt=None,
+        form_kind=None, form_known={"exercise": next_name} if next_name else {})
     if next_name:
-        await form(message, state, "set_weight", f"{next_name}: с каким весом выполняли упражнение? Можно сказать «без веса».")
+        await form(message, state, "set_weight", f"{next_name}: с каким весом выполняли упражнение?", known={"exercise":next_name})
     else:
         await form(message, state, "set_name", "Какое упражнение добавим? Если уже закончили, можно завершить тренировку.")
 
@@ -781,18 +938,27 @@ async def append_program_exercise(message, state, reps):
 
 
 @router.message(Input.value)
-async def receive(message: Message, state, professor_client=None):
+async def receive(message: Message, state, professor_client=None, professor_bot=None, expert_client=None):
+    if getattr(message, "voice", None) or getattr(message, "video_note", None):
+        from .mentor_messages import spoken_message
+        try:
+            message = await spoken_message(message, state, professor_client)
+        except Exception:
+            await message.answer("Сейчас не получилось обработать запись. Уже собранное осталось; попробуйте позже или ответьте текстом.")
+            return
+        if message is None: return
     from .mentor_panel import reply_panel
     panel = await reply_panel(message, state)
     try:
         async with input_lock(message.from_user.id):
-            await receive_value(panel if panel is not None else message, state, professor_client)
+            await receive_value(panel if panel is not None else message, state, professor_client,
+                professor_bot=professor_bot, expert_client=expert_client, original=message)
     finally:
         if panel is not None:
             await panel.flush()
 
 
-async def receive_value(message, state, professor_client=None):
+async def receive_value(message, state, professor_client=None, *, normalized=None, professor_bot=None, expert_client=None, original=None):
     uid = message.from_user.id
     if not mentor_enabled(uid):
         await state.clear()
@@ -801,9 +967,22 @@ async def receive_value(message, state, professor_client=None):
     kind = values.get("form_kind")
     text = (message.text or "").strip()
     try:
-        if kind in MODELS:
+        if normalized is not None:
+            text = normalized
+        elif kind in MODELS and not (kind == "progress_photo" and getattr(message, "photo", None)):
             text = await parse_step(message, state, kind, professor_client)
             if text is None:
+                current = await state.get_data()
+                intent = current.get("form_intent")
+                if intent == "cancel":
+                    await state.clear()
+                    await message.answer("Отменено. Ничего не записывал.", reply_markup=keyboard())
+                elif intent in {"pause", "unknown"}:
+                    await state.update_data(form_paused=True, form_intent=None)
+                    await message.answer("Хорошо, оставим это пока. Уже собранное осталось — вернёмся, когда будет удобно.", reply_markup=keyboard([("Отмена", "menu")]))
+                elif intent == "question":
+                    await state.update_data(form_intent=None)
+                    await converse(original or message, state, professor_bot, professor_client, expert_client)
                 return
             values = await state.get_data()
         if kind == "weight":
@@ -817,29 +996,31 @@ async def receive_value(message, state, professor_client=None):
             await review_input(message, state, "timezone", {"timezone": text}, "Ваш часовой пояс: "+timezone_label(text)+". Сохранить?")
         elif kind == "program_name":
             if not text or len(text) > 120: raise ValueError()
-            await form(message, state, "program_sets", "Сколько подходов планируете?", program_name=text)
-            await message.answer("Можно выбрать кнопкой или ответить своими словами.", reply_markup=keyboard([(str(i), f"program_sets:{i}") for i in range(1, 6)]))
+            if values.get("form_known", {}).get("weekday") is not None:
+                await state.update_data(program_weekday=values["form_known"]["weekday"])
+            await next_step(message, state, "program_sets", "Сколько подходов планируете?", professor_client, program_name=text,
+                rows=[[(str(i), f"program_sets:{i}") for i in range(1, 6)]])
         elif kind == "program_sets":
             sets = int(text)
             if not 1 <= sets <= 30: raise ValueError()
-            await form(message, state, "program_reps", "Сколько повторений в каждом подходе?", program_sets=sets)
-            await message.answer("Можно выбрать кнопкой или ответить своими словами.", reply_markup=keyboard([(str(i), f"program_reps:{i}") for i in (6, 8, 10, 12, 15)]))
+            await next_step(message, state, "program_reps", "Сколько повторений в каждом подходе?", professor_client, program_sets=sets,
+                rows=[[(str(i), f"program_reps:{i}") for i in (6, 8, 10, 12, 15)]])
         elif kind == "program_reps":
             await append_program_exercise(message, state, int(text))
         elif kind == "set_name":
             if not text or len(text)>120: raise ValueError()
-            await form(message, state, "set_weight", "С каким весом выполняли упражнение? Можно сказать «без веса».", planned_exercise=text)
+            await next_step(message, state, "set_weight", "С каким весом выполняли упражнение?", professor_client, planned_exercise=text)
         elif kind == "set_weight":
             weight=number(text)
             if not 0 <= weight <= 1000: raise ValueError()
-            await form(message, state, "set_reps", "Сколько повторений выполнено?", set_weight=weight)
+            await next_step(message, state, "set_reps", "Сколько повторений выполнено?", professor_client, set_weight=weight)
         elif kind == "set_reps":
             reps=int(text)
             if not 1 <= reps <= 1000: raise ValueError()
             pending={"exercise": values["planned_exercise"], "weight_kg": values["set_weight"], "reps": reps}
             receipt=str(message.message_id)
             await state.set_state(None)
-            await state.update_data(pending_set=pending, set_receipt=receipt, set_request_key=request_key(message))
+            await state.update_data(pending_set=pending, set_receipt=receipt, set_request_key=request_key(message), text_confirmation_ready=True)
             await message.answer(f"{pending['exercise']}: {fmt(pending['weight_kg'])} кг × {reps}\nПодход завершён?", parse_mode=None,
                 reply_markup=keyboard([("✅ Да, записать", "set_confirm:"+receipt)], [("✏️ Изменить", "set_edit:"+receipt)]))
         elif kind == "target":
@@ -856,18 +1037,27 @@ async def receive_value(message, state, professor_client=None):
         elif kind == "measurement":
             parts = text.split()
             if len(parts) != 3: raise ValueError()
-            await make_draft(message, uid, state, "measurement", {key: number(value) for key, value in zip(("waist_cm", "chest_cm", "hips_cm"), parts) if value != "-"})
+            retained = {k:v for k,v in values.get("original_record", {}).items() if k in {"photo_file_id", "note"}}
+            await make_draft(message, uid, state, "measurement", {**retained, **{key: number(value) for key, value in zip(("waist_cm", "chest_cm", "hips_cm"), parts) if value != "-"}})
         elif kind == "progress_photo":
             if not message.photo:
                 raise ValueError()
-            await make_draft(message, uid, state, "measurement", {"photo_file_id": message.photo[-1].file_id, "note": message.caption or ""})
+            retained = {k:v for k,v in values.get("original_record", {}).items() if k in {"waist_cm", "chest_cm", "hips_cm", "note"}}
+            await make_draft(message, uid, state, "measurement", {**retained, "photo_file_id": message.photo[-1].file_id, "note": message.caption or retained.get("note", "")})
+        elif kind == "wellbeing_score":
+            score = int(text)
+            if score not in range(1, 6): raise ValueError()
+            await next_step(message, state, "wellbeing_energy", "Сколько сейчас энергии — от одного до пяти?", professor_client,
+                score=score, rows=[[(str(i), f"energy:{i}") for i in range(1, 6)], [("Пропустить", "energy:skip")]])
         elif kind == "wellbeing_energy":
             energy = None if text == "-" else int(text)
             if energy is not None and not 1 <= energy <= 5: raise ValueError()
-            await form(message, state, "wellbeing_note", "Как вы себя чувствуете? Если вам сильно хуже, обратитесь за медицинской помощью.", energy_score=energy)
-            await message.answer("Заметку можно не добавлять.", reply_markup=keyboard([("Пропустить", "wellbeing_skip")]))
+            await next_step(message, state, "wellbeing_note", wellbeing_prompt({**values, "energy_score":energy}), professor_client,
+                energy_score=energy, rows=[[("Пропустить", "wellbeing_skip")]])
         elif kind == "wellbeing_note":
             await make_draft(message, uid, state, "wellbeing", {"score": values["score"], "energy_score": values.get("energy_score"), "note": "" if text == "-" else text})
+        elif kind == "wellbeing_record":
+            await make_draft(message, uid, state, "wellbeing", json.loads(text))
         elif kind == "meal_search":
             if not text: raise ValueError()
             await state.set_state(None)
@@ -880,18 +1070,20 @@ async def receive_value(message, state, professor_client=None):
             await message.answer("Ваша цель сохранена.", reply_markup=keyboard([("Профиль", "profile")]))
         elif kind == "course":
             if not text or len(text) > 120: raise ValueError()
-            await form(message, state, "course_dose", "Какая дозировка указана в вашей схеме?", course_data={"name": text})
+            await next_step(message, state, "course_dose", "Какая дозировка указана в вашей схеме?", professor_client, course_data={"name": text})
         elif kind == "course_reminder":
             clock=None if text=="-" else text
             if clock is not None and (len(clock)!=5 or time.fromisoformat(clock).tzinfo is not None): raise ValueError()
             await state.set_state(None)
-            await state.update_data(pending_reminder_time=clock)
+            await state.update_data(pending_reminder_time=clock, text_confirmation_ready=True,
+                pending_input={"kind":"course_reminder", "token":secrets.token_hex(8),
+                    "payload":{"entry_id":values["course_id"], "reminder_time":clock}})
             await message.answer("Новое время уведомления: "+(clock or "по сохранённой схеме")+". Сохранить?", reply_markup=keyboard([("✅ Сохранить", "course_reminder_save")], [("Отмена", "course")]))
         elif kind == "course_dose":
             if not text or len(text) > 240: raise ValueError()
             await state.update_data(course_data={**values["course_data"], "dose_text": text})
             await state.set_state(None)
-            await message.answer("Источник существующей схемы", reply_markup=keyboard([("Назначил специалист", "course_source:specialist"), ("Моя существующая схема", "course_source:user")]))
+            await message.answer("Эту схему назначил специалист?", reply_markup=keyboard([("Назначил специалист", "course_source:specialist"), ("Моя существующая схема", "course_source:user")]))
         elif kind == "course_schedule":
             start, end, days, clocks = [p.strip() for p in text.split("|")]
             schedule = {"interval_days": int(days.split("=", 1)[1])} if days.lower().startswith("интервал=") else {"weekdays": [int(d.strip())-1 for d in days.split(",")]}
@@ -907,7 +1099,11 @@ async def receive_value(message, state, professor_client=None):
             for clock in times:
                 if len(clock) != 5 or time.fromisoformat(clock).tzinfo is not None: raise ValueError()
             course = {**values["course_data"], "start_date": start, "end_date": end, **schedule, "times": times}
-            await form(message, state, "course_supply", "Какой запас у вас сейчас есть? Если не знаете, можно пропустить.", course_data=course)
+            await next_step(message, state, "course_supply", "Какой запас у вас сейчас есть?", professor_client, course_data=course)
+        elif kind == "course_record":
+            merged = {**values["course_data"], **json.loads(text)}
+            allowed = {"name","dose_text","source","timezone","start_date","end_date","weekdays","interval_days","times","supply_amount","amount_per_intake","supply_unit"}
+            await make_draft(message, uid, state, "course", {k:v for k,v in merged.items() if k in allowed and v is not None})
         elif kind == "course_supply":
             course = values["course_data"]
             if text != "-":
@@ -924,7 +1120,7 @@ async def receive_value(message, state, professor_client=None):
             pending = {"exercise": name, "weight_kg": number(weight), "reps": int(reps)}
             receipt = str(message.message_id)
             await state.set_state(None)
-            await state.update_data(pending_set=pending, set_receipt=receipt, set_request_key=request_key(message))
+            await state.update_data(pending_set=pending, set_receipt=receipt, set_request_key=request_key(message), text_confirmation_ready=True)
             await message.answer(f"{name}: {fmt(pending['weight_kg'])} кг × {pending['reps']}. Записать подход?", parse_mode=None,
                 reply_markup=keyboard([("Да, записать", "set_confirm:"+receipt)], [("Изменить", "set_edit:"+receipt)]))
         elif kind == "workout_duration":
@@ -948,5 +1144,5 @@ async def receive_value(message, state, professor_client=None):
             await state.clear()
             await message.answer("Откройте раздел заново.", reply_markup=keyboard())
     except (ValueError, KeyError, BridgeError) as error:
-        detail = str(error) if isinstance(error, BridgeError) and error.status != 422 else "Не получилось записать ответ. Давайте попробуем ещё раз."
-        await message.answer(detail+"\n\n"+values.get("form_prompt", ""), parse_mode=None, reply_markup=keyboard([("Отмена", "menu")]))
+        detail = str(error) if isinstance(error, BridgeError) and error.status != 422 else "Не получилось сохранить запись. Уже собранные данные остались."
+        await message.answer(detail+"\n\n"+values.get("form_question", values.get("form_prompt", "")), parse_mode=None, reply_markup=keyboard([("Отмена", "menu")]))

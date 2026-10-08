@@ -119,14 +119,9 @@ async def enter(message,user_id,state,*,onboarding=True):
         saved=await api("/dashboard",{"telegram_user_id":user_id});p=saved.get("profile",{})
         from .mentor_flows import home_view
         text=home_view(saved)
-        questions=[("goal","Какого результата по весу хотите достичь?"),("current_weight_kg","Сколько вы сейчас весите?"),
-            ("height_cm","Какой у вас рост?"),("age","Сколько вам лет?"),("sex","Для расчёта КБЖУ уточню: вы мужчина или женщина?"),("target_weight_kg","Какого веса хотите достичь?"),
-            ("activity","Какая у вас обычно физическая активность?")]
-        questions = [(field, q) for field, q in questions if field != "target_weight_kg" or p.get("goal") in {"weight_loss", "weight_gain"}]
-        question=next((q for field,q in questions if p.get(field) is None),None) if onboarding else None
+        question="С чем хотите помочь себе сегодня?" if onboarding else None
         if question:
             text+="\n\n"+question;save_opening_question(user_id,question)
-        else: text+="\nВыберите действие или просто напишите сообщение."
     except BridgeError:
         saved = {}
         text="Наставник ElixirPeptide\n\nПрофиль сейчас не загрузился. Можно продолжить разговор или попробовать открыть меню позже."
@@ -138,8 +133,8 @@ async def mentor_command(message:Message,state:FSMContext):
     await enter(message,message.from_user.id,state)
 
 
-async def ask(message,uid,text):
-    save_opening_question(uid,text)
+async def ask(message,uid,text,*,context=None):
+    save_opening_question(uid,text+("\nСлужебный контекст: "+context if context else ""))
     await message.answer(text,reply_markup=back_keyboard(),parse_mode=None)
 
 
@@ -160,6 +155,8 @@ def today_text(data):
         lines.append("\nДо сохранённой нормы: " + "; ".join(f"{labels[k][0]} {fmt(v)} {labels[k][1]}" for k, v in remaining.items()))
     else:
         lines.append("\nЧисловая норма не сохранена. Остаток не рассчитан.")
+    from .mentor_insights import daily_insight
+    lines.append("\n"+daily_insight(data))
     return "\n".join(lines)
 
 
@@ -186,7 +183,7 @@ def profile_text(p):
     values={"weight_loss":"снижение веса","maintain":"поддержание","weight_gain":"набор веса","custom":"своя цель","male":"мужской","female":"женский"}
     lines=[f"{label}: {fmt(p[key]) if isinstance(p[key], (int, float)) else values.get(str(p[key]),p[key])}" for key,label in labels.items() if p.get(key) is not None]
     if p.get("sex") is None: lines.append("Пол: не указан")
-    return "👤 Мои данные и цель\n\n"+("\n".join(lines)[:3400] if lines else "Профиль пока не заполнен.")+"\n\nЧто хотите изменить? Напишите новые данные обычным сообщением."
+    return "👤 Мои данные и цель\n\n"+("\n".join(lines)[:3400] if lines else "Профиль пока не заполнен.")+"\n\nЧто изменилось?"
 
 
 async def show_reminders(message,uid):
@@ -260,7 +257,7 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
             saved = await api("/dashboard", {"telegram_user_id": uid}) if action == "ask" else {}
             return await message.answer(SECTIONS[action][0],reply_markup=section_keyboard(action, saved.get("profile")),parse_mode=None)
         if action=="meal" or action.startswith("meal:"):
-            return await ask(message,uid,"Что вы съели? Расскажите или пришлите фото, голосовое сообщение либо видеокружок. Медиа доступны в режиме ИИ-профессора.")
+            return await ask(message,uid,"Что вы съели?")
         if action=="weight":
             from .mentor_flows import form
             return await form(message, state, "weight", "Сколько вы сейчас весите?")
@@ -284,6 +281,7 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
         if action.startswith(("meal_confirm:","meal_cancel:")):
             kind,value=action.split(":",1)
             result=await api("/journal/action",{"telegram_user_id":uid,"entry_id":int(value),"action":"confirm" if kind=="meal_confirm" else "cancel"})
+            await state.update_data(pending_reviews=[e for e in (await state.get_data()).get("pending_reviews", []) if e["id"] != int(value)])
             text="Добавлено в дневник. Итоги за сегодня обновлены." if result['entry']['status']=='confirmed' else "Оценка не записана в дневник."
             if result['entry']['status']=='confirmed':
                 entry=result['entry']
@@ -309,21 +307,21 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
 
 
 @router.message(WeightInput.value)
-async def save_weight(message: Message, state: FSMContext, professor_client=None):
+async def save_weight(message: Message, state: FSMContext, professor_client=None, professor_bot=None, expert_client=None):
     from .mentor_flows import receive
     await state.update_data(form_kind="weight", form_prompt="Сколько вы сейчас весите?")
-    await receive(message, state, professor_client)
+    await receive(message, state, professor_client, professor_bot, expert_client)
 
 
 @router.message(SettingsInput.timezone)
-async def timezone_input(message:Message,state:FSMContext,professor_client=None):
-    await save_timezone(message, state, professor_client)
+async def timezone_input(message:Message,state:FSMContext,professor_client=None,professor_bot=None,expert_client=None):
+    await save_timezone(message, state, professor_client, professor_bot, expert_client)
 
 
-async def save_timezone(message,state,professor_client=None):
+async def save_timezone(message,state,professor_client=None,professor_bot=None,expert_client=None):
     from .mentor_flows import receive
     await state.update_data(form_kind="timezone", form_prompt="В каком городе вы живёте? Подстрою время напоминаний.")
-    await receive(message, state, professor_client)
+    await receive(message, state, professor_client, professor_bot, expert_client)
 
 
 async def reminder_loop(bot):

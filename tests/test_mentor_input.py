@@ -65,7 +65,7 @@ def test_typed_extraction_passes_only_normalized_data_to_existing_contract(kind,
 def test_every_step_has_strict_schema_without_arbitrary_properties(kind):
     schema = to_strict_json_schema(n.ENVELOPES[kind])
     assert schema["additionalProperties"] is False
-    assert set(schema["required"]) == {"data", "clarification", "skip"}
+    assert set(schema["required"]) == {"data", "clarification", "skip", "intent"}
 
 
 @pytest.mark.parametrize("kind,data", [

@@ -1,4 +1,4 @@
-from src.ai.telegram_mentor import wrap_client, mentor_enabled, reset_mentor_conversations
+from src.ai.telegram_mentor import wrap_client, mentor_enabled, reset_mentor_conversations, BridgeError
 import base64
 import asyncio
 import httpx
@@ -591,7 +591,7 @@ async def handle_media_group(messages: list[Message], state: FSMContext, profess
         schedule_webapp_call(safe_webapp_call(webapp_client.update_user(user_id, {"last_used": last_used}), operation="update_last_used"), operation="update_last_used")
         await _notify_user(message, user_texts.pick_fallback_free, 10)
 
-    elif last_used != LAST_USED_PROFESSOR: await _notify_user(message, user_texts.premium_mode_hint, 10)
+    elif last_used != LAST_USED_PROFESSOR and not mentor_enabled(user_id): await _notify_user(message, user_texts.premium_mode_hint, 10)
 
     if last_used != LAST_USED_PROFESSOR: return await message.answer(user_texts.expert_text_only, reply_markup=user_keyboards.upgrade_to_professor)
     if user.tg_phone: schedule_webapp_call(safe_webapp_call(webapp_client.update_user_name(user_id, message.from_user.first_name, message.from_user.last_name), operation="update_user_name"), operation="update_user_name")
@@ -619,13 +619,23 @@ async def handle_media_group(messages: list[Message], state: FSMContext, profess
         next_requests = max(int(getattr(user, "premium_requests", 0) or 0) - 1, 0)
         schedule_webapp_call(safe_webapp_call(webapp_client.update_user(message.from_user.id, {"premium_requests": next_requests}), operation="decrement_premium_requests"), operation="decrement_premium_requests")
 
+    if response.get("mentor"):
+        from .mentor_flows import remember_response
+        await remember_response(state, response)
     return await professor_bot.parse_response(response, message, back_menu=True)
 
 
 @professor_user_router.message(lambda message: not message.media_group_id and ((message.text and message.text.strip()) or (message.caption and message.caption.strip()) or message.photo or message.video or message.video_note or message.document or message.voice))
 @with_action()
-async def handle_single_ai_message(message: Message, state: FSMContext, professor_bot, professor_client, expert_client=None):
+async def handle_single_ai_message(message: Message, state: FSMContext, professor_bot, professor_client, expert_client=None, *, mentor_followup=False):
     user_id = message.from_user.id
+    if mentor_enabled(user_id) and not mentor_followup:
+        from .mentor_flows import pending_text
+        try:
+            if await pending_text(message, state, professor_client, professor_bot=professor_bot, expert_client=expert_client): return True
+        except BridgeError as error:
+            await message.answer(str(error), parse_mode=None)
+            return True
     existing_user = await webapp_client.get_user("tg_id", user_id)
     last_used, has_unknown_last_used = _resolve_last_used(existing_user)
     active_client = _resolve_mode_client(last_used, professor_client, expert_client)
@@ -635,7 +645,7 @@ async def handle_single_ai_message(message: Message, state: FSMContext, professo
         schedule_webapp_call(safe_webapp_call(webapp_client.update_user(user_id, {"last_used": last_used}), operation="update_last_used"), operation="update_last_used")
         await _notify_user(message, user_texts.pick_fallback_free, 10)
 
-    elif last_used != LAST_USED_PROFESSOR: await _notify_user(message, user_texts.premium_mode_hint, 10)
+    elif last_used != LAST_USED_PROFESSOR and not mentor_enabled(user_id): await _notify_user(message, user_texts.premium_mode_hint, 10)
 
     if last_used != LAST_USED_PROFESSOR and has_supported_media(message): return await message.answer(user_texts.expert_text_only, reply_markup=user_keyboards.upgrade_to_professor)
     if user.tg_phone:schedule_webapp_call(safe_webapp_call(webapp_client.update_user_name(user_id, message.from_user.first_name, message.from_user.last_name), operation="update_user_name"), operation="update_user_name")
@@ -646,6 +656,9 @@ async def handle_single_ai_message(message: Message, state: FSMContext, professo
 
     response = await safe_ai_response(message, send_message_v2_from_telegram(message=message, professor_client=active_client, user_id=user_id, conversation_id=user.conversation_id))
     if response is None: return None
+    if response.get("mentor"):
+        from .mentor_flows import remember_response
+        await remember_response(state, response)
     schedule_webapp_call(
         safe_webapp_call(
             webapp_client.write_usage(
