@@ -27,6 +27,7 @@ CATALOG_TOOLS = [
      "parameters": {"type": "object", "properties": {"product_id": {"type": "integer", "minimum": 1}, "variant_id": {"type": "integer", "minimum": 1}}, "additionalProperties": False}},
 ]
 CATALOG_INSTRUCTIONS = """
+Для численного расчёта нормы КБЖУ обязательно используй preview_mentor_nutrition. Самостоятельно формулу или ограничения не обходи, даже если старый ответ или база знаний содержит другие цифры. Если инструмент отказал, объясни его конкретную причину и направь к ручному вводу нормы специалиста. Отсутствие подтверждения ограничений требует кнопки «Мои нормы КБЖУ → Рассчитать по профилю». Успешный расчёт создаёт только черновик и кнопку «Сохранить как мою норму»; без нажатия норма не сохранена. Для предложения программы используй draft_mentor_program: только черновик с явным подтверждением, без медицинских назначений.
 Интеграция магазина в личном Telegram-чате: актуальные товары, цены и наличие проверяй через search_catalog_products/get_catalog_product/get_product_stock. Это каталог мобильного приложения; ассортимент и цена WebApp могут отличаться. Описания продавца не доказывают медицинскую эффективность. При ошибке честно скажи, что проверить каталог не удалось. Не придумывай товары, цены, ссылки или наличие. Рекомендуй релевантные варианты без давления и обещаний результата.
 Купить можно в мобильном приложении и Telegram WebApp этого бота. На вопрос где купить/как заказать/дайте ссылку или желание купить добавь [[OPEN_SHOP]] и скажи, что магазин открывается кнопкой под ответом. Бот сам подставляет проверенный WebApp; не генерируй URL для покупки. Не оформляй заказ.
 Ты наставник по питанию, привычкам, тренировкам и прогрессу. Цели: снижение веса (weight_loss), набор веса (weight_gain), поддержание (maintain), своя цель (custom + goal_detail). Не навязывай похудение человеку с другой целью. Сохраняй явно сообщённые факты через update_mentor_profile. Не обещай сохранение, если инструмент не подтвердил успех. Не выдавай свободный текст за сохранённую программу, курс, норму КБЖУ, измерение или напоминание: для них есть отдельные кнопки и подтверждения.
@@ -90,6 +91,7 @@ def _open_state_db():
     con.execute("CREATE TABLE IF NOT EXISTS conversations (user_id INTEGER NOT NULL, model_mode TEXT NOT NULL, conversation_id TEXT, PRIMARY KEY(user_id,model_mode))")
     con.execute("CREATE TABLE IF NOT EXISTS opening_questions (user_id INTEGER PRIMARY KEY, question TEXT NOT NULL)")
     con.execute("CREATE TABLE IF NOT EXISTS delivered_reminders (user_id INTEGER NOT NULL, delivery_id INTEGER NOT NULL, PRIMARY KEY(user_id,delivery_id))")
+    con.execute("CREATE TABLE IF NOT EXISTS generations (user_id INTEGER PRIMARY KEY, value INTEGER NOT NULL)")
     return con
 
 
@@ -128,6 +130,13 @@ def save_mentor_conversation(user_id, mode, conversation_id):
 def reset_mentor_conversations(user_id):
     with _state_db() as db:
         db.execute("DELETE FROM conversations WHERE user_id=?", (user_id,))
+        db.execute("INSERT INTO generations VALUES (?,1) ON CONFLICT(user_id) DO UPDATE SET value=value+1", (user_id,))
+
+
+def mentor_generation(user_id):
+    with _state_db() as db:
+        row = db.execute("SELECT value FROM generations WHERE user_id=?", (user_id,)).fetchone()
+        return row[0] if row else 0
 
 
 def opening_question(user_id):
@@ -161,6 +170,11 @@ def forget_delivery(user_id, delivery_id):
         db.execute("DELETE FROM delivered_reminders WHERE user_id=? AND delivery_id=?", (user_id, delivery_id))
 
 
+def forget_all_deliveries(user_id):
+    with _state_db() as db:
+        db.execute("DELETE FROM delivered_reminders WHERE user_id=?", (user_id,))
+
+
 class TelegramAIClient:
     def __init__(self, delegate, user_id, mode):
         self.delegate, self.user_id, self.mode = delegate, user_id, mode
@@ -169,6 +183,7 @@ class TelegramAIClient:
         return getattr(self.delegate, name)
 
     async def send_message_v2(self, **kwargs):
+        generation = mentor_generation(self.user_id)
         try:
             await api("/workspace/touch", {"telegram_user_id": self.user_id})
         except BridgeError:
@@ -179,12 +194,15 @@ class TelegramAIClient:
             saved = None
         question = opening_question(self.user_id)
         token = catalog_context.set({"usage": [0, 0, 0], "saved": saved, "opening_question": question,
+            "generation": generation,
             "telegram_user_id": self.user_id, "source_text": kwargs.get("input_text") or "",
             "request_key": hashlib.sha256(str(kwargs.get("trace_id") or uuid4().hex).encode()).hexdigest()})
         try:
             original_conversation = kwargs.get("conversation_id")
             mentor_kwargs = {**kwargs, "conversation_id": mentor_conversation(self.user_id, self.mode)}
             response = await self.delegate.send_message_v2(**mentor_kwargs)
+            if mentor_generation(self.user_id) != generation:
+                raise BridgeError("Диалог сброшен. Откройте наставника заново.")
             if response.get("conversation_id"):
                 save_mentor_conversation(self.user_id, self.mode, response["conversation_id"])
             # Existing bot sync code must never replace the ordinary assistant conversation.
@@ -192,6 +210,8 @@ class TelegramAIClient:
             response.pop("conversation_reset_reason", None)
             clear_opening_question(self.user_id, question)
             response["meal_draft"] = catalog_context.get().get("meal_draft")
+            response["target_draft"] = catalog_context.get().get("target_draft")
+            response["program_draft"] = catalog_context.get().get("program_draft")
             response["mentor"] = True  # Health-related chat text is not logged.
             response["open_shop"] = SHOP_MARKER in response.get("text", "") or purchase_intent(kwargs.get("input_text"))
             response["text"] = response.get("text", "").replace(SHOP_MARKER, "")
@@ -246,16 +266,32 @@ def public_memory(value):
 async def execute_tool(context, name, arguments):
     if not isinstance(arguments, dict):
         raise ValueError("Tool arguments must be an object")
+    if context.get("generation") is not None and context["generation"] != mentor_generation(context["telegram_user_id"]):
+        raise BridgeError("Диалог сброшен. Откройте наставника заново.")
+    version = (context.get("saved") or {}).get("version")
     if name == "get_mentor_diary":
         result = await api("/dashboard", {"telegram_user_id": context["telegram_user_id"]})
         context["saved"] = result
         return public_memory(result)
     if name == "draft_mentor_meal":
-        payload = {"telegram_user_id": context["telegram_user_id"], "request_key": context["request_key"], "meal": arguments.get("meal")}
+        payload = {"telegram_user_id": context["telegram_user_id"], "request_key": context["request_key"], "meal": arguments.get("meal"), "expected_version":version}
         for field in ("replaces_id", "occurred_at"):
             if arguments.get(field) is not None: payload[field] = arguments[field]
         result = await api("/journal/draft", payload)
         if result.get("entry", {}).get("status") == "draft": context["meal_draft"] = result["entry"]
+        return result
+    if name == "preview_mentor_nutrition":
+        eligibility = bool((context.get("saved") or {}).get("workspace", {}).get("nutrition_eligibility_confirmed"))
+        result = await api("/workspace/nutrition/preview", {"telegram_user_id":context["telegram_user_id"], "eligibility_confirmed":eligibility})
+        if result.get("available"):
+            draft = await api("/workspace/draft", {"telegram_user_id":context["telegram_user_id"], "request_key":"target:"+context["request_key"],
+                "kind":"target", "data":{**result["nutrition"], "source":"user"}, "expected_version":version})
+            context["target_draft"] = draft["entry"]
+        return result
+    if name == "draft_mentor_program":
+        result = await api("/workspace/draft", {"telegram_user_id":context["telegram_user_id"], "request_key":"program:"+context["request_key"],
+            "kind":"program", "data":{"exercises":arguments.get("exercises")}, "expected_version":version})
+        context["program_draft"] = result["entry"]
         return result
     if name in CATALOG_NAMES:
         return await api("/catalog", {"name": name, "arguments": arguments})
@@ -274,6 +310,15 @@ async def execute_tool(context, name, arguments):
 
 
 JOURNAL_TOOLS = [
+    {"type":"function", "name":"preview_mentor_nutrition", "strict":False,
+     "description":"Only way to calculate numeric nutrition targets. Uses saved profile and user-confirmed eligibility, same rules as the menu. Refusal is authoritative: do not calculate alternative targets. Success makes a draft with a Save button.",
+     "parameters":{"type":"object", "properties":{}, "additionalProperties":False}},
+    {"type":"function", "name":"draft_mentor_program", "strict":False,
+     "description":"Propose a weekly workout program as a draft, never as saved. Ask about experience, equipment and restrictions when unknown. No medical prescriptions.",
+     "parameters":{"type":"object", "properties":{"exercises":{"type":"array", "minItems":1, "maxItems":100,
+        "items":{"type":"object", "properties":{"weekday":{"type":"integer", "minimum":0, "maximum":6},
+          "name":{"type":"string", "maxLength":120}, "sets":{"type":"integer", "minimum":1,"maximum":30}, "reps":{"type":"integer","minimum":1,"maximum":200}},
+          "required":["weekday","name","sets","reps"], "additionalProperties":False}}}, "required":["exercises"], "additionalProperties":False}},
     {"type":"function","name":"get_mentor_diary","strict":False,
      "description":"Read confirmed meals for today, weight history, the latest meal draft and profile. Never invent missing diary entries.",
      "parameters":{"type":"object","properties":{},"additionalProperties":False}},

@@ -1,4 +1,5 @@
 from src.bot.handlers.mentor import router as mentor_router, shop_button, response_keyboard, reminder_loop, MentorNavigationMiddleware
+from src.bot.handlers.mentor_delivery import send_mentor_reply
 import asyncio
 import copy
 import logging
@@ -234,7 +235,9 @@ class ProfessorBot(Bot):
 
         if out_text:
             text_markup = reply_markup
-            if len(out_text) > MAX_TG_MSG_LEN:
+            if response.get("mentor"):
+                sent_message = await send_mentor_reply(message, out_text, text_markup)
+            elif len(out_text) > MAX_TG_MSG_LEN:
                 self.__logger.info("OUTGOING long text | len=%d | splitting", len(out_text))
                 chunks = await split_text(out_text)
                 for idx, chunk in enumerate(chunks[:-1], start=1):

@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import logging
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from aiogram import F, Router, BaseMiddleware
@@ -25,6 +26,10 @@ class SettingsInput(StatesGroup):
     timezone = State()
 
 
+class WeightInput(StatesGroup):
+    value = State()
+
+
 def button(label, action):
     return InlineKeyboardButton(text=label, callback_data="mentor:"+action)
 
@@ -38,12 +43,12 @@ def menu(gates=None):
     visible = [button(label, action) for label, action in items if gates.get(action, True) and action not in closed]
     rows = [[button("➕ Добавить еду", "meal")]] if gates.get("food", True) and "food" not in closed else []
     rows += [visible[i:i+2] for i in range(0, len(visible), 2)]
-    return InlineKeyboardMarkup(inline_keyboard=[*rows, [button("← Обычный ИИ", "leave")]])
+    return InlineKeyboardMarkup(inline_keyboard=[*rows, [button("🏠 Главное меню", "leave")]])
 
 
 SECTIONS = {
-    "food": ("🍽 Питание",[("📷 Добавить по фото","meal:photo"),("🎙 Добавить голосом","meal:voice"),("✍️ Добавить текстом","meal:text"),("⭕ Отправить кружок","meal:video"),
-        ("♻️ Повторить прошлый приём","repeat_previous"),("⭐ Любимые блюда","favorites"),("🔎 Найти продукт","food_lookup"),("📊 Итоги за сегодня","nutrition"),("🍲 Что мне поесть?","suggest"),("📅 История питания","meals:0"),("Мои нормы КБЖУ","target")]),
+    "food": ("🍽 Питание",[("➕ Добавить еду","meal"),
+        ("♻️ Повторить прошлый приём","repeat_previous"),("⭐ Любимые блюда","favorites"),("🔎 Найти продукт","food_lookup"),("📊 Итоги за сегодня","nutrition"),("🍲 Что мне поесть?","suggest"),("📅 История питания","meals:0"),("🎯 Мои нормы КБЖУ","target")]),
     "progress": ("📊 Прогресс",[("⚖️ Добавить вес","weight"),("📏 Добавить замеры","measurement"),("📷 Добавить фото","progress_photo"),("📈 График веса","weight_chart"),("Последние измерения веса","history"),("Фото и замеры","measurements"),("🏋️ Прогресс тренировок","workout_results"),("📊 Отчёт за неделю","weekly"),("За месяц","monthly")]),
     "plan": ("🎯 Мой план",[("План на сегодня","daily_plan"),("Скорректировать план","adjust")]),
     "profile": ("Профиль",[("Мои данные и цель","data"),("Изменить цель","goals")]),
@@ -51,8 +56,10 @@ SECTIONS = {
     "ask": ("💬 Спросить наставника",[("🍲 Что поесть?","suggest"),("📊 Проанализировать мой день","analyze_day"),("🏋️ Скорректировать тренировку","reason:workout"),("⚖️ Почему вес стоит?","reason:plateau"),("🧬 Вопрос по моему курсу","specialist"),("💬 Задать свой вопрос","question"),("✏️ Скорректировать план","adjust")])}
 
 
-def section_keyboard(section):
-    return InlineKeyboardMarkup(inline_keyboard=[*[ [button(label,action)] for label,action in SECTIONS[section][1]],
+def section_keyboard(section, profile=None):
+    items = [("⚖️ Почему вес не растёт?" if action == "reason:plateau" and (profile or {}).get("goal") == "weight_gain" else label, action)
+        for label, action in SECTIONS[section][1]]
+    return InlineKeyboardMarkup(inline_keyboard=[*[ [button(label,action)] for label,action in items],
         [button("← Меню наставника","menu")]])
 
 
@@ -64,8 +71,12 @@ def response_keyboard(response):
     keyboard=back_keyboard()
     draft=response.get("meal_draft")
     if draft:
-        keyboard.inline_keyboard.insert(0,[button("✅ Всё верно",f"meal_confirm:{draft['id']}"),button("❌ Отменить",f"meal_cancel:{draft['id']}")])
+        keyboard.inline_keyboard.insert(0,[button("✅ Записать в дневник",f"meal_confirm:{draft['id']}"),button("❌ Отменить",f"meal_cancel:{draft['id']}")])
         keyboard.inline_keyboard.insert(1,[button("✏️ Изменить",f"meal_edit:{draft['id']}"),button("➕ Добавить продукт",f"meal_add:{draft['id']}")])
+    for key, label in (("target_draft", "Сохранить как мою норму"), ("program_draft", "Сохранить программу")):
+        if response.get(key):
+            entry = response[key]
+            keyboard.inline_keyboard.insert(0, [button(label, f"record:confirm:{entry['id']}"), button("Отмена", f"record:cancel:{entry['id']}")])
     return keyboard
 
 
@@ -83,6 +94,11 @@ class MentorNavigationMiddleware(BaseMiddleware):
         message=getattr(event,"text",None) or ""
         command=message.split(maxsplit=1)[0].split("@")[0] if message else ""
         if callback in {"user:main_menu","user:main_menuu","user:ai:start","user:ai:free","user:ai:premium"} or command=="/start":
+            if mentor_enabled(event.from_user.id) and configured():
+                try:
+                    await api("/workspace/workout/discard-empty", {"telegram_user_id": event.from_user.id})
+                except BridgeError:
+                    log.warning("Could not discard empty mentor workout on exit")
             set_mentor_enabled(event.from_user.id,False)
             clear_opening_question(event.from_user.id,opening_question(event.from_user.id))
             state=data.get("state")
@@ -127,18 +143,20 @@ async def ask(message,uid,text):
 
 
 def today_text(data):
+    from .mentor_format import day
     t=data.get("totals", {"kcal": 0, "protein": 0, "fat": 0, "carbs": 0})
     target=data.get("workspace", {}).get("target") or {}
-    lines=[f"📊 Ваши итоги за сегодня · {data.get('date', '')}", ""]
+    lines=[f"📊 Ваши итоги за сегодня · {day(data.get('date', ''))}", ""]
     for key,label,unit in [("kcal","Калории","ккал"),("protein","Белки","г"),("fat","Жиры","г"),("carbs","Углеводы","г")]:
-        lines.append(f"{label}: ≈ {fmt(t[key])} / {fmt(target.get(key))} {unit}")
+        value = f"{fmt(t[key])} / {fmt(target[key])} {unit}" if target.get(key) is not None else f"{fmt(t[key])} {unit} (норма не задана)"
+        lines.append(f"{label}: ≈ {value}")
     lines += ["", "Учитываются только записанные приёмы пищи. КБЖУ — приблизительная оценка."]
     if not data.get("meals"):
         lines.insert(2, "Сегодня в дневнике ещё нет записанной еды.")
     remaining = data.get("workspace", {}).get("remaining")
     if remaining:
-        labels = {"kcal": "ккал", "protein": "белка, г", "fat": "жиров, г", "carbs": "углеводов, г"}
-        lines.append("\nДо сохранённой нормы: " + "; ".join(f"{fmt(v)} {labels[k]}" for k, v in remaining.items()))
+        labels = {"kcal": ("калории", "ккал"), "protein": ("белки", "г"), "fat": ("жиры", "г"), "carbs": ("углеводы", "г")}
+        lines.append("\nДо сохранённой нормы: " + "; ".join(f"{labels[k][0]} {fmt(v)} {labels[k][1]}" for k, v in remaining.items()))
     else:
         lines.append("\nЧисловая норма не сохранена. Остаток не рассчитан.")
     return "\n".join(lines)
@@ -165,7 +183,8 @@ def profile_text(p):
     labels={"goal":"Цель","goal_detail":"Подробности цели","age":"Возраст","sex":"Пол","height_cm":"Рост, см","current_weight_kg":"Вес, кг",
         "target_weight_kg":"Целевой вес, кг","activity":"Активность","preferences":"Предпочтения","restrictions":"Ограничения"}
     values={"weight_loss":"снижение веса","maintain":"поддержание","weight_gain":"набор веса","custom":"своя цель","male":"мужской","female":"женский"}
-    lines=[f"{label}: {values.get(str(p[key]),p[key])}" for key,label in labels.items() if p.get(key) is not None]
+    lines=[f"{label}: {fmt(p[key]) if isinstance(p[key], (int, float)) else values.get(str(p[key]),p[key])}" for key,label in labels.items() if p.get(key) is not None]
+    if p.get("sex") is None: lines.append("Пол: не указан")
     return "👤 Мои данные и цель\n\n"+("\n".join(lines)[:3400] if lines else "Профиль пока не заполнен.")+"\n\nЧто хотите изменить? Напишите новые данные обычным сообщением."
 
 
@@ -179,11 +198,27 @@ async def run_ai_action(query,state,professor_bot,professor_client,expert_client
     from src.bot.handlers.new_user import handle_single_ai_message
     if not await check_blocked(query) or not await CHAT_NOT_BANNED_FILTER(query): return
     # Same model/phone/quota/usage path as typed messages; only the chosen prompt is synthetic.
+    started = time.monotonic()
+    status = await query.message.answer("⏳ Подбираю…" if query.data == "mentor:suggest" else "⏳ Считаю…", parse_mode=None)
     message=query.message.model_copy(update={"from_user":query.from_user,"text":text,"caption":None,
         "photo":None,"document":None,"video":None,"voice":None,"video_note":None,
-        "message_id":1_000_000_000+int(hashlib.sha256(query.id.encode()).hexdigest()[:8],16)%1_000_000_000})
+        "message_id":status.message_id})
     message.as_(query.bot)
-    await handle_single_ai_message(message,state,professor_bot,professor_client,expert_client)
+    retry = InlineKeyboardMarkup(inline_keyboard=[[button("Повторить", query.data.removeprefix("mentor:"))], [button("← Меню наставника", "menu")]])
+    try:
+        result = await handle_single_ai_message(message,state,professor_bot,professor_client,expert_client)
+    except Exception:
+        log.exception("Mentor AI callback failed | action=%s", query.data.split(":")[1])
+        await status.edit_text("Не удалось получить ответ. Попробуйте ещё раз.", parse_mode=None,
+            reply_markup=retry)
+    else:
+        if result is None:
+            await status.edit_text("Ответ не получен. Попробуйте ещё раз.", parse_mode=None, reply_markup=retry)
+        else:
+            try: await status.delete()
+            except Exception: log.warning("Mentor progress message could not be removed")
+    finally:
+        log.info("Mentor AI callback timing | action=%s | elapsed_ms=%d", query.data.split(":")[1], (time.monotonic()-started)*1000)
 
 
 @router.callback_query(F.data.startswith("mentor:"))
@@ -191,7 +226,7 @@ async def mentor_action(query:CallbackQuery,state:FSMContext,professor_bot=None,
     from .mentor_panel import MentorPanel, navigate_page
     if query.data.startswith("mentor:page:"):
         return await navigate_page(query, state)
-    panel = MentorPanel(query.message, state)
+    panel = MentorPanel(query.message, state, saved_card=(await state.get_data()).get("mentor_panel", {}))
     try:
         await perform_action(query, state, panel, professor_bot, professor_client, expert_client)
     finally:
@@ -203,10 +238,13 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
     await query.answer()
     if action=="leave":
         from src.bot.keyboards import user_keyboards
+        from src.bot.texts import user_texts
+        await api("/workspace/workout/discard-empty", {"telegram_user_id": uid})
         set_mentor_enabled(uid,False);await state.clear()
         clear_opening_question(uid,opening_question(uid))
-        return await message.answer("Вы вернулись к обычному ИИ-ассистенту. Задайте свой вопрос.",reply_markup=user_keyboards.backk)
+        return await message.answer(user_texts.greetings.replace('full_name', query.from_user.full_name),reply_markup=user_keyboards.main_menu)
     if action in {"open","menu","start"}:
+        await api("/workspace/workout/discard-empty", {"telegram_user_id": uid})
         return await enter(message,uid,state,onboarding=action!="menu")
     if not mentor_enabled(uid):
         return await message.answer("Откройте наставника, чтобы продолжить.",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[button("🌿 Наставник ElixirPeptide","open")]]))
@@ -215,10 +253,13 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
         from .mentor_flows import dispatch
         if await dispatch(query, state, action, professor_bot, professor_client, expert_client, panel=message): return
         if action in SECTIONS:
-            return await message.answer(SECTIONS[action][0],reply_markup=section_keyboard(action),parse_mode=None)
+            saved = await api("/dashboard", {"telegram_user_id": uid}) if action == "ask" else {}
+            return await message.answer(SECTIONS[action][0],reply_markup=section_keyboard(action, saved.get("profile")),parse_mode=None)
         if action=="meal" or action.startswith("meal:"):
             return await ask(message,uid,"Отправьте фотографию еды, голосовое сообщение, видеокружок или напишите, что вы съели. Например: «гречка 150 г, куриная грудка 200 г и овощной салат».\nДля кружка используйте кнопку видео в Telegram. Медиа доступны в режиме ИИ-профессора.")
-        if action=="weight": return await ask(message,uid,"Сколько вы сейчас весите, в килограммах?")
+        if action=="weight":
+            await state.set_state(WeightInput.value)
+            return await message.answer("Сколько вы сейчас весите, в килограммах? Например: 100 или 75,5.", reply_markup=back_keyboard(), parse_mode=None)
         if action=="question": return await ask(message,uid,"Что хотите обсудить?")
         if action in {"nutrition","history","data"}:
             data=await api("/dashboard",{"telegram_user_id":uid})
@@ -226,6 +267,8 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
             text={"nutrition":today_text,"history":history_text,"data":lambda d:profile_text(d['profile'])}[action](data)
             if action=="data": save_opening_question(uid,"Какие данные профиля или цель хотите изменить?")
             kb=section_keyboard(section)
+            if action == "data":
+                kb.inline_keyboard.insert(0, [button("Мужской", "sex:male"), button("Женский", "sex:female")])
             if action=="nutrition":
                 from .mentor_flows import keyboard
                 kb=keyboard([("🍽 Что поесть?","suggest")],[("📋 Все приёмы пищи","meals:0")],[("📷 Добавить еду","meal")])
@@ -259,6 +302,29 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
     except (BridgeError,ValueError) as error:
         text=str(error) if isinstance(error,BridgeError) else "Не удалось обработать действие. Откройте меню и попробуйте снова."
         await message.answer(text,reply_markup=back_keyboard(),parse_mode=None)
+
+
+@router.message(WeightInput.value)
+async def save_weight(message: Message, state: FSMContext):
+    if not mentor_enabled(message.from_user.id):
+        await state.clear()
+        return
+    import re
+    text = (message.text or "").strip()
+    match = re.fullmatch(r"(\d+(?:[.,]\d+)?)\s*(?:кг|kg)?", text, re.I)
+    if not match or not 0 < float(match[1].replace(",", ".")) <= 500:
+        return await message.answer("Напишите вес в кг от 0 до 500, например: 100 или 75,5.", reply_markup=back_keyboard(), parse_mode=None)
+    weight = float(match[1].replace(",", "."))
+    try:
+        saved = await api("/dashboard", {"telegram_user_id": message.from_user.id})
+        await api("/profile/update", {"telegram_user_id": message.from_user.id, "expected_version": saved["version"],
+            "request_key": f"weight:{message.chat.id}:{message.message_id}", "source_text": text, "evidence": text,
+            "patch": {"current_weight_kg": weight}})
+    except BridgeError as error:
+        return await message.answer(str(error)+"\nПовторите вес, например: 75,5.", reply_markup=back_keyboard(), parse_mode=None)
+    await state.clear()
+    await message.answer(f"Вес {fmt(weight)} кг записан.", parse_mode=None, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [button("Последние измерения", "history")], [button("← Меню наставника", "menu")]]))
 
 
 @router.message(SettingsInput.timezone)
@@ -324,19 +390,15 @@ async def send_reminder(bot, item):
             if item['kind']=="evening":
                 text=today_text(saved)
             else:
-                report=saved['workspace']['weekly']
-                text="📊 Отчёт за неделю\n"+report['from']+" — "+report['to']+"\n"+"\n".join([
-                    f"Изменение веса: {number(report.get('weight_change_kg'))} кг",
-                    f"Средний вес: {number(report.get('weight_mean_7d'))} кг",
-                    f"Средняя калорийность: {number(report.get('average_kcal'))} ккал · дней с записями: {report.get('nutrition_days', 0)}",
-                    f"Белок к норме: {number(report.get('protein_target_percent'))}%",
-                    f"Тренировки: {report['workouts']} · в плане {report.get('planned_workouts', 0)}",
-                    f"Курс: {report['course_done']} / {report['course_due']}",
-                    f"Энергия: {number(report.get('energy_mean'))} / 5",
-                    "Продолжайте дневник и сравнивайте недельные средние. Пропущенные записи не считаются нулём."])
+                from .mentor_flows import weekly_view
+                text=weekly_view(saved)
                 image=await asyncio.to_thread(weight_chart_png, saved)
     if image is not None:
-        await bot.send_photo(item['telegram_user_id'], BufferedInputFile(image, filename="weekly-weight.png"), caption=text, parse_mode=None, protect_content=True, reply_markup=markup)
+        short = len(text.encode("utf-16-le")) // 2 <= 1000
+        await bot.send_photo(item['telegram_user_id'], BufferedInputFile(image, filename="weekly-weight.png"), caption=text if short else "Динамика сохранённых измерений веса.", parse_mode=None, protect_content=True, reply_markup=markup if short else None)
+        if not short:
+            for start in range(0, len(text), 2000):
+                await bot.send_message(item['telegram_user_id'], text[start:start+2000], parse_mode=None, protect_content=True, reply_markup=markup if start+2000 >= len(text) else None)
     else:
         await bot.send_message(item['telegram_user_id'], text, parse_mode=None, protect_content=True, reply_markup=markup)
 

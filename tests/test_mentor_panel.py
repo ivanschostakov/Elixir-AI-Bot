@@ -11,7 +11,7 @@ from src.bot.handlers.mentor_flows import keyboard
 
 
 class State:
-    def __init__(self): self.values = {}
+    def __init__(self): self.values = {"mentor_panel": {"message_id": 4, "chat_id": 123}}
     async def update_data(self, **kwargs): self.values.update(kwargs)
     async def get_data(self): return self.values
 
@@ -94,12 +94,12 @@ def test_real_menu_handler_edits_instead_of_sending(monkeypatch, tmp_path, actio
     monkeypatch.setattr(mentor_flows, "api", AsyncMock(return_value=dashboard()))
     msg = message()
     query = SimpleNamespace(id="q1", data="mentor:"+action, from_user=SimpleNamespace(id=123), message=msg, answer=AsyncMock())
-    asyncio.run(mentor.mentor_action(query, FormState()))
+    asyncio.run(mentor.mentor_action(query, FormState(mentor_panel={"message_id":4, "chat_id":123})))
     msg.answer.assert_not_awaited()
     msg.edit_text.assert_awaited_once()
 
 
-def test_typed_workout_steps_edit_same_card_and_keep_user_request_identity(monkeypatch, tmp_path):
+def test_typed_workout_steps_send_below_user_and_keep_request_identity(monkeypatch, tmp_path):
     from src.bot.handlers import mentor_flows as f
     from src.ai import telegram_mentor
     from test_telegram_flows import State as FormState
@@ -113,13 +113,14 @@ def test_typed_workout_steps_edit_same_card_and_keep_user_request_identity(monke
             mentor_panel={"message_id":4, "chat_id":123, "photo":False})
         await f.receive(msg, state)
         assert state.values["form_kind"] == "set_reps"
-        assert bot.edit_message_text.await_args.kwargs["message_id"] == 4
+        bot.edit_message_text.assert_not_awaited()
+        assert "повторений" in msg.answer.await_args.args[0]
         msg.message_id, msg.text = 901, "10"
         await f.receive(msg, state)
         assert state.values["pending_set"]["weight_kg"] == 20
         assert state.values["set_request_key"] == "tg:123:901"
-        assert bot.edit_message_text.await_count == 2
-        msg.answer.assert_not_awaited()
+        bot.edit_message_text.assert_not_awaited()
+        assert msg.answer.await_count == 2
         bot.send_message.assert_not_awaited()
     asyncio.run(run())
 

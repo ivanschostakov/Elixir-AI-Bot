@@ -194,12 +194,19 @@ def test_plan_button_uses_existing_gated_ai_handler(monkeypatch):
     handler=AsyncMock();monkeypatch.setattr(new_user,'handle_single_ai_message',handler)
     async def run():
         bot=Bot('111:testtoken')
+        from aiogram.methods import SendMessage
+        async def fake_request(_bot, method, **kwargs):
+            if isinstance(method, SendMessage):
+                return Message(message_id=21,date=datetime.now(timezone.utc),chat=Chat(id=456,type='private'),text=method.text).as_(bot)
+            return True
+        monkeypatch.setattr(bot.session, "make_request", fake_request)
         user=User(id=456,is_bot=False,first_name='Test')
         msg=Message(message_id=20,date=datetime.now(timezone.utc),chat=Chat(id=456,type='private'),from_user=User(id=111,is_bot=True,first_name='Bot'),text='Menu').as_(bot)
         query=CallbackQuery(id='callback-plan',from_user=user,chat_instance='test',message=msg,data='mentor:daily_plan').as_(bot)
         await mentor.run_ai_action(query,SimpleNamespace(),bot,'premium-client','free-client','Составь план на сегодня')
         sent=handler.await_args.args[0]
         assert sent.from_user.id==456 and sent.text=='Составь план на сегодня'
+        assert sent.message_id == 21
         assert handler.await_args.args[2:] == (bot,'premium-client','free-client')
         await bot.session.close()
     asyncio.run(run())

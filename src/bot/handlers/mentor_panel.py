@@ -17,10 +17,11 @@ async def edit_panel(message, text, markup):
 
 
 class MentorPanel:
-    def __init__(self, message, state, target=None):
+    def __init__(self, message, state, target=None, saved_card=None):
         self.message = message
         self.target = target if target is not None else message
         self.state = state
+        self.saved_card = saved_card
         self.blocks = []
 
     def __getattr__(self, key):
@@ -48,6 +49,10 @@ class MentorPanel:
                     pages[-1]["rows"] += rows
                 else:
                     pages.append({"text": chunk, "rows": list(rows)})
+        saved = self.saved_card if self.saved_card is not None else (await self.state.get_data()).get("mentor_panel", {})
+        if saved.get("message_id") != self.target.message_id or saved.get("chat_id") != self.message.chat.id:
+            # An AI answer or a confirmation is immutable history, not a menu card.
+            self.target = await self.message.answer("Открываю раздел…", parse_mode=None)
         token = secrets.token_hex(4)
         await self.state.update_data(mentor_panel={"token": token, "message_id": self.target.message_id,
             "chat_id": self.message.chat.id, "photo": bool(getattr(self.target, "photo", None)), "pages": pages})
@@ -67,10 +72,8 @@ class StoredCard:
 
 
 async def reply_panel(message, state):
-    saved = (await state.get_data()).get("mentor_panel", {})
-    if saved.get("chat_id") != message.chat.id or not saved.get("message_id"):
-        return None
-    return MentorPanel(message, state, StoredCard(message.bot, saved))
+    # Form responses must appear below the user's input, never above it.
+    return None
 
 
 async def show_page(message, pages, token, index):
@@ -96,7 +99,7 @@ async def show_page(message, pages, token, index):
         paging.append(InlineKeyboardButton(text="→", callback_data=f"mentor:page:{token}:{index+1}"))
     if paging:
         rows.append(paging)
-    rows.append(home or [InlineKeyboardButton(text="🏠 Главное меню", callback_data="mentor:menu")])
+    rows.append(home or [InlineKeyboardButton(text="← Меню наставника", callback_data="mentor:menu")])
     text = page["text"] + (f"\n\n{index+1} / {len(pages)}" if len(pages) > 1 else "")
     await edit_panel(message, text, InlineKeyboardMarkup(inline_keyboard=rows))
 

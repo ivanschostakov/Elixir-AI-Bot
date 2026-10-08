@@ -121,7 +121,7 @@ def test_nutrition_shows_actual_macro_targets():
     data["workspace"]["target"] = {"kcal": 1900, "protein": 145}
     result = mentor.today_text(data)
     assert "1 240 / 1 900" in result and "96 / 145" in result
-    assert "Жиры: ≈ 0 / не указан" in result
+    assert "Жиры: ≈ 0 г (норма не задана)" in result
 
 
 def test_closed_food_blocks_new_media_and_add_buttons(monkeypatch):
@@ -222,13 +222,14 @@ def test_failed_form_does_not_claim_save(monkeypatch):
         text="2000 100 70 240", answer=AsyncMock())
     state = State(form_kind="target")
     asyncio.run(f.receive(message, state))
-    assert message.answer.await_args.args[0] == "Сервис недоступен"
+    assert message.answer.await_args.args[0].startswith("Сервис недоступен")
+    assert "Пример:" in message.answer.await_args.args[0]
     assert state.values["form_kind"] == "target"
 
 
 def test_specialist_link_is_never_invented(monkeypatch):
     monkeypatch.delenv("TELEGRAM_MENTOR_SPECIALIST_URL", raising=False)
-    assert f.specialist_button() is None
+    assert f.specialist_button().url == "https://t.me/ShostakovIV"
     monkeypatch.setenv("TELEGRAM_MENTOR_SPECIALIST_URL", "javascript:alert(1)")
     assert f.specialist_button() is None
     monkeypatch.setenv("TELEGRAM_MENTOR_SPECIALIST_URL", "https://example.test/specialist")
@@ -257,7 +258,7 @@ def test_report_labels_include_period_and_real_sample_counts():
         "workouts": 1, "duration_minutes": 30, "volume_kg": 100, "course_done": 0, "course_due": 0}
     result = f.weekly_view({"workspace": {"weekly": report}})
     assert "за 30 дней" in result and "81 кг · измерений 2" in result
-    assert "Средняя энергия: нет данных" in result
+    assert "Средняя энергия:" not in result
 
 
 def test_reminder_local_receipts_survive_ack_failure():
