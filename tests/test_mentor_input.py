@@ -231,7 +231,8 @@ def test_empty_photographic_answer_never_invokes_text_parser():
     msg,state=message(""),State(form_kind="measurement",form_token="test")
     assert asyncio.run(n.parse_step(msg,state,"measurement",client)) is None
     client.responses.parse.assert_not_awaited()
-    assert "текстом" in msg.answer.await_args.args[0]
+    assert "талии" in msg.answer.await_args.args[0]
+    assert "текстом" not in msg.answer.await_args.args[0]
 
 
 def test_mutation_is_not_confirmed_when_backend_rejects_it(monkeypatch):

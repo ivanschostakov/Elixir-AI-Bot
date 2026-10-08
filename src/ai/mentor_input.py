@@ -162,6 +162,11 @@ def family(kind):
 
 def merge_known(kind, known, data):
     merged = {**known, **{k: v for k, v in data.items() if v is not None}}
+    if kind in {"course", "course_dose", "course_schedule", "course_supply", "course_record"}:
+        if data.get("interval_days") is not None and data.get("weekdays") is None:
+            merged["weekdays"] = None
+        elif data.get("weekdays") is not None and data.get("interval_days") is None:
+            merged["interval_days"] = None
     key = {"program_sets": "sets", "program_reps": "reps", "set_weight": "weight_kg", "set_reps": "reps",
         "wellbeing_score":"score", "wellbeing_energy":"energy_score"}.get(kind)
     if key and data.get("value") is not None:
@@ -197,6 +202,7 @@ known содержит уже собранные данные этой запи�
 В program_name/program_sets/program_reps извлекай name, sets, reps и явно названный weekday даже если спросили одну деталь. value — ответ на текущее числовое поле. В set_name/set_weight/set_reps извлекай exercise, weight_kg, reps. Остальные известные поля бери из known.
 На текущем шаге уточняй только его обязательное поле: следующие вопросы задаст бот. Не требуй повторить все данные. Для редактирования known — исходная запись: меняй только явно исправленное и возвращай объединённый результат.
 course/course_dose/course_schedule/course_supply разделяют known: сохраняй явно названные name, dose_text, расписание и запас. dose_text — дословный фрагмент пользовательской схемы, не назначение и не расчёт. Не угадывай единицы или дозы.
+Дни недели и интервал — взаимоисключающие режимы расписания: если человек явно меняет режим на интервал, верни weekdays=null; если на дни недели — interval_days=null. Не сохраняй одновременно старый режим и новый.
 wellbeing_note — только фактически сказанное самочувствие, не твои советы. custom_goal — сформулированная человеком цель, не встречный вопрос.
 В workout_duration значение value ВСЕГДА в минутах: полтора часа = 90, час = 60, полчаса = 30.
 В weight и set_weight вес ВСЕГДА в килограммах; в measurement замеры ВСЕГДА в сантиметрах.
@@ -390,7 +396,7 @@ async def parse_step(message, state, kind, client):
     generation = mentor_generation(message.from_user.id)
     text = (message.text or "").strip()
     if not text:
-        await message.answer("Ответьте, пожалуйста, текстом на текущий вопрос.", parse_mode=None)
+        await message.answer(values.get("form_question") or values.get("form_prompt") or followup(kind, values.get("form_known", {}), values), parse_mode=None)
         return None
     answers = [*values.get("form_answers", []), {"question": values.get("form_question", values.get("form_prompt", "")), "answer": text}]
     # Keep validated facts when compacting temporary conversational history.

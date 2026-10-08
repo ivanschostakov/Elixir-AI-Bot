@@ -299,3 +299,20 @@ def test_counterquestion_during_correction_retains_original_bot_transport(monkey
     asyncio.run(f.pending_text(msg,state,client,professor_bot=bot,expert_client=expert))
     converse.assert_awaited_once_with(msg,state,bot,client,expert)
     assert state.values["form_known"]["weight"] == 70
+
+
+@pytest.mark.parametrize("before,patch,expected", [
+    ({"weekdays":[0,2],"interval_days":None},{"weekdays":None,"interval_days":3},{"weekdays":None,"interval_days":3}),
+    ({"weekdays":None,"interval_days":3},{"weekdays":[1,4],"interval_days":None},{"weekdays":[1,4],"interval_days":None})])
+def test_course_correction_switches_schedule_mode_without_losing_dates(before,patch,expected):
+    dates = {"start_date":"2026-10-08","end_date":"2026-10-18","times":["08:00"]}
+    merged = n.merge_known("course_record",{**dates,**before},patch)
+    assert merged == {**dates,**expected}
+    assert n.canonical("course_schedule",merged,False,{})
+
+
+def test_missing_text_repeats_the_question_not_typing_instructions():
+    msg = message("")
+    state = State(form_question="Сколько вы сейчас весите?")
+    assert asyncio.run(n.parse_step(msg,state,"weight",None)) is None
+    assert msg.answer.await_args.args[0] == "Сколько вы сейчас весите?"
