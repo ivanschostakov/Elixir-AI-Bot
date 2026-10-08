@@ -1,5 +1,6 @@
 """Human-confirmed Telegram forms; model prose never stands in for persistence."""
 import asyncio
+import secrets
 from datetime import date, datetime, time
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -10,6 +11,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 import config
 
 from src.ai.telegram_mentor import api, BridgeError, mentor_enabled
+from src.ai.mentor_input import MODELS, input_lock, parse_step
 from .mentor_format import day, period, timezone_label, DAYS, GOALS, ACTIVITY
 
 router = Router(name="mentor_forms")
@@ -74,7 +76,8 @@ async def reminders_view(message, uid):
 
 async def form(message, state, kind, prompt, **data):
     await state.set_state(Input.value)
-    await state.update_data(form_kind=kind, form_prompt=prompt, **data)
+    await state.update_data(form_kind=kind, form_prompt=prompt, form_question=prompt,
+        form_answers=[], form_token=secrets.token_hex(8), form_profile_version=None, pending_input=None, **data)
     await message.answer(prompt, parse_mode=None, reply_markup=keyboard([("Отмена", "menu")]))
 
 
@@ -83,10 +86,10 @@ def draft_text(entry):
     if kind == "course":
         lines = ["Проверьте существующую схему", entry["name"], "Дозировка: "+entry["dose_text"],
             "Источник: "+("специалист" if entry["source"] == "specialist" else "ваша схема"),
-            f"{entry['start_date']} - {entry['end_date']}",
+            period(entry['start_date'], entry['end_date']),
             (f"Каждые {entry['interval_days']} дн. от даты начала" if entry.get("interval_days") else
-             "Дни недели (пн=1): "+", ".join(str(d+1) for d in entry["weekdays"])),
-            "Время: "+", ".join(entry["times"])+" · "+entry["timezone"],
+             "Дни недели: "+", ".join(DAYS[d] for d in entry["weekdays"])),
+            "Время: "+", ".join(entry["times"])+" · "+timezone_label(entry["timezone"]),
             "Это запись вашей схемы, а не назначение. Дозировки бот не подбирает."]
         if entry.get("supply_amount") is not None:
             lines.append(f"Запас {fmt(entry['supply_amount'])} {entry['supply_unit']}; на приём {fmt(entry['amount_per_intake'])} {entry['supply_unit']}")
@@ -114,11 +117,52 @@ async def show_draft(message, entry):
 async def make_draft(message, uid, state, kind, data, *, key=None):
     saved = await state.get_data()
     payload = {"telegram_user_id": uid, "request_key": key or request_key(message), "kind": kind, "data": data}
+    if saved.get("form_profile_version") is not None:
+        payload["expected_version"] = saved["form_profile_version"]
     if saved.get("replace_kind") == kind:
         payload["replaces_id"] = saved.get("replace_id")
     result = await api("/workspace/draft", payload)
     await state.clear()
     await show_draft(message, result["entry"])
+
+
+async def review_input(message, state, kind, payload, text):
+    token = secrets.token_hex(8)
+    await state.set_state(None)
+    await state.update_data(pending_input={"kind": kind, "payload": payload, "token": token})
+    await message.answer(text, parse_mode=None, reply_markup=keyboard(
+        [("Да, сохранить", "input_save:"+token)], [("Исправить", "input_edit:"+token)]))
+
+
+async def confirm_input(message, uid, state, action):
+    root, token = action.split(":", 1)
+    async with input_lock(uid):
+        values = dict(await state.get_data())
+        pending = values.get("pending_input")
+        if not pending or pending["token"] != token:
+            raise BridgeError("Эта запись уже обработана или заменена. Откройте нужный раздел заново.")
+        if root == "input_edit":
+            await form(message, state, values["form_kind"], values["form_prompt"])
+            return
+        payload = {"telegram_user_id": uid, **pending["payload"]}
+        kind = pending["kind"]
+        if kind == "weight":
+            weight = payload.pop("weight")
+            await api("/profile/update", {**payload, "patch": {"current_weight_kg": weight}})
+            await state.clear()
+            await message.answer(f"Вес {fmt(weight)} кг записан.", parse_mode=None,
+                reply_markup=keyboard([("Последние измерения", "history")]))
+        elif kind in {"reminder", "timezone"}:
+            saved = await api("/dashboard", {"telegram_user_id": uid})
+            await api("/reminder/options", {"telegram_user_id": uid,
+                **reminder_payload(saved["settings"]), **pending["payload"]})
+            await state.clear()
+            await reminders_view(message, uid)
+        elif kind == "workout_duration":
+            result = await api("/workspace/workout/finish", payload)
+            await state.clear()
+            await workout_result(message, result["entry"])
+
 
 
 def today_view(data):
@@ -263,13 +307,13 @@ async def start_form(message, uid, state, action, *, editing=False):
             [("✍️ Ввести готовую программу", "program_text")]))
         return True
     prompts = {
-        "target": "Введите вашу согласованную дневную норму: ккал белки жиры углеводы. Например: 2000 100 70 240. Можно указать только калории. Бот не назначает эту норму.",
-        "program": "Введите упражнения недельной программы, каждое с новой строки:\nдень недели (пн=1, вс=7) | упражнение | подходы | повторы\nНапример: 1 | Присед | 3 | 10",
-        "measurement": "Введите замеры в сантиметрах: талия грудь бёдра. Для неизвестного значения укажите -.",
+        "target": "Какая у вас согласованная дневная норма калорий и БЖУ? Расскажите своими словами. Если знаете только калории, достаточно их. Бот не назначает эту норму.",
+        "program": "Какая у вас программа тренировок на неделю? Расскажите, в какие дни занимаетесь, какие упражнения делаете и сколько подходов и повторений.",
+        "measurement": "Какие замеры хотите записать? Расскажите, сколько сантиметров составляют талия, грудь или бёдра. Можно записать только известные замеры.",
         "progress_photo": "Пришлите личное фото прогресса. Оно сохранится только после вашего подтверждения; публичная ссылка не создаётся.",
-        "meal_search": "Введите название блюда для поиска в вашем дневнике.",
+        "meal_search": "Какое блюдо найти в вашем дневнике?",
         "custom_goal": "Какова ваша цель?",
-        "course": "Введите название средства из вашей существующей схемы. Бот не назначает и не меняет лечение или дозировки.",
+        "course": "Как называется средство из вашей существующей схемы? Бот не назначает и не меняет лечение или дозировки.",
     }
     if action not in prompts:
         return False
@@ -298,11 +342,16 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         "course_reminder": "course", "course_reminder_save": "course", "reminder_reports_yes": "settings",
         "weight_chart": "progress", "specialist": "course", "analyze_day": "ask",
         "question": "ask", "adjust": "ask", "reason": "ask", "daily_plan": "ask", "wellbeing": "today", "energy": "today", "wellbeing_skip": "today"}.get(root, root)
+    if root in {"input_save", "input_edit"}:
+        pending = (await state.get_data()).get("pending_input") or {}
+        section = {"weight": "progress", "workout_duration": "workouts"}.get(pending.get("kind"), "settings")
     closed = {x.strip() for x in config.env("TELEGRAM_MENTOR_CLOSED_SECTIONS", "").split(",")}
     if not gates.get(section, True) or section in closed:
         await message.answer("Раздел временно отключён.", reply_markup=keyboard())
         return True
-    if action == "food_lookup":
+    if root in {"input_save", "input_edit"}:
+        await confirm_input(message, uid, state, action)
+    elif action == "food_lookup":
         from src.ai.telegram_mentor import save_opening_question
         save_opening_question(uid, "Оцени КБЖУ указанного продукта и порции. Если порция не указана, уточни её. Создай только черновик; запись в дневник после подтверждения.")
         await message.answer("Напишите название продукта, порцию и способ приготовления. Можно прислать этикетку. КБЖУ будет приблизительной оценкой; продукт попадёт в дневник только после подтверждения.", reply_markup=keyboard([("Найти среди моих записей", "meal_search")]))
@@ -349,7 +398,7 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
     elif root == "course_reminder":
         course=next((c for c in w.get("courses", []) if c["id"] == int(action.split(":")[1])), None)
         if not course: raise BridgeError("Курс не найден.")
-        await form(message, state, "course_reminder", "Во сколько напоминать в дни курса? Введите HH:MM или - для времени из схемы. Меняется только уведомление, не время приёма и не дозировка. Часовой пояс: "+course["timezone"], course_id=course["id"])
+        await form(message, state, "course_reminder", "Во сколько напоминать в дни курса? Можно оставить время из схемы. Меняется только уведомление, не время приёма и не дозировка. Часовой пояс: "+timezone_label(course["timezone"]), course_id=course["id"])
     elif action == "course_reminder_save":
         values=await state.get_data()
         if "pending_reminder_time" not in values: raise BridgeError("Откройте настройку времени заново.")
@@ -401,7 +450,7 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
             "Помоги составить недельную программу тренировок по моему профилю. Уточни ограничения и опыт, если они неизвестны. "
             "Покажи упражнения, дни недели, подходы и повторы. Используй draft_mentor_program для черновика; не утверждай, что программа сохранена без подтверждения кнопкой.")
     elif action == "program_text":
-        await form(message, state, "program", "Введите готовую программу, по одному упражнению в строке. Например: 1 | Присед | 3 | 10. Дни: пн=1, вс=7. Или вернитесь к пошаговому конструктору.")
+        await form(message, state, "program", "Какая у вас готовая программа? Расскажите своими словами про дни, упражнения, подходы и повторы. Можно скопировать текст программы.")
     elif action == "program_day":
         await message.answer("В какой день будет упражнение?", reply_markup=keyboard(*[[(label, f"program_day:{i}")] for i, label in enumerate(DAYS)]))
     elif root == "program_day":
@@ -558,7 +607,7 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
             raise BridgeError("Начните добавление схемы заново.")
         course["source"] = action.split(":")[1]
         course["timezone"] = data["settings"]["timezone"]
-        await form(message, state, "course_schedule", "Введите: дата начала | дата конца | дни недели (пн=1) или интервал | время\nНапример: 2026-10-01 | 2026-10-31 | 1,4 | 09:00\nДля интервала замените 1,4 на интервал=10 (каждые 10 дней от начала). Несколько времён через запятую. Другие средства можно добавить отдельными пунктами курса.", course_data=course)
+        await form(message, state, "course_schedule", "Какое расписание указано в вашей существующей схеме? Расскажите, когда начинается и заканчивается курс, в какие дни или с каким интервалом и в какое время запланированы приёмы. Бот не подбирает расписание лечения.", course_data=course)
     elif action == "wellbeing":
         await state.update_data(replace_kind=None, replace_id=None)
         await message.answer("Как ваше самочувствие? 1 — очень плохо, 5 — хорошо.", reply_markup=keyboard([(str(i), f"wellbeing:{i}") for i in range(1, 6)]))
@@ -659,13 +708,13 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
             await api("/reminder/options", {"telegram_user_id": uid, **values})
             await reminders_view(message, uid)
         else:
-            prompt = "Введите время HH:MM или - для выключения."
-            if kind == "weekly": prompt = "Введите день недели (пн=1, вс=7) и время, например 7 19:00; - для выключения."
-            if kind == "inactivity": prompt = "Через сколько дней без записей напомнить (1-30)? Отправьте - для выключения."
+            prompt = "Во сколько вам удобно получать напоминание? Можно также попросить его выключить."
+            if kind == "weekly": prompt = "В какой день недели и во сколько присылать итоги? Можно попросить выключить это напоминание."
+            if kind == "inactivity": prompt = "Через сколько дней без записей напомнить о дневнике? Можно попросить выключить это напоминание."
             await form(message, state, "reminder", prompt, reminder_kind=kind)
             if kind in {"morning", "evening"}:
                 clocks = ("07:00", "08:00", "09:00") if kind == "morning" else ("19:00", "20:00", "21:00")
-                await message.answer("Выберите время или введите ЧЧ:ММ, например 08:00.", reply_markup=keyboard(
+                await message.answer("Можно выбрать время кнопкой или ответить своими словами.", reply_markup=keyboard(
                     [(clock, "reminder_clock:"+clock) for clock in clocks], [("Выключить", "reminder_clock:off")]))
     elif root == "reminder_clock":
         values = await state.get_data()
@@ -732,17 +781,18 @@ async def append_program_exercise(message, state, reps):
 
 
 @router.message(Input.value)
-async def receive(message: Message, state):
+async def receive(message: Message, state, professor_client=None):
     from .mentor_panel import reply_panel
     panel = await reply_panel(message, state)
     try:
-        await receive_value(panel if panel is not None else message, state)
+        async with input_lock(message.from_user.id):
+            await receive_value(panel if panel is not None else message, state, professor_client)
     finally:
         if panel is not None:
             await panel.flush()
 
 
-async def receive_value(message, state):
+async def receive_value(message, state, professor_client=None):
     uid = message.from_user.id
     if not mentor_enabled(uid):
         await state.clear()
@@ -751,7 +801,21 @@ async def receive_value(message, state):
     kind = values.get("form_kind")
     text = (message.text or "").strip()
     try:
-        if kind == "program_name":
+        if kind in MODELS:
+            text = await parse_step(message, state, kind, professor_client)
+            if text is None:
+                return
+            values = await state.get_data()
+        if kind == "weight":
+            weight = number(text)
+            statement = f"Подтверждаю мой вес: {weight:g} кг."
+            await review_input(message, state, "weight", {"weight": weight,
+                "expected_version": values.get("form_profile_version"),
+                "source_text": (message.text or "")+"\n"+statement, "evidence": statement,
+                "request_key": request_key(message)}, f"Правильно понял: ваш текущий вес {fmt(weight)} кг?")
+        elif kind == "timezone":
+            await review_input(message, state, "timezone", {"timezone": text}, "Ваш часовой пояс: "+timezone_label(text)+". Сохранить?")
+        elif kind == "program_name":
             if not text or len(text) > 120: raise ValueError()
             await form(message, state, "program_sets", "Сколько подходов? Например: 3.", program_name=text)
             await message.answer("Выберите число подходов или напишите своё:", reply_markup=keyboard([(str(i), f"program_sets:{i}") for i in range(1, 6)]))
@@ -800,7 +864,7 @@ async def receive_value(message, state):
         elif kind == "wellbeing_energy":
             energy = None if text == "-" else int(text)
             if energy is not None and not 1 <= energy <= 5: raise ValueError()
-            await form(message, state, "wellbeing_note", "Добавьте заметку о самочувствии или отправьте - без заметки. При выраженном ухудшении обратитесь за медицинской помощью; бот не меняет дозировки.", energy_score=energy)
+            await form(message, state, "wellbeing_note", "Хотите добавить что-то о самочувствии? Можно нажать «Пропустить». При выраженном ухудшении обратитесь за медицинской помощью; бот не меняет дозировки.", energy_score=energy)
             await message.answer("Заметку можно не добавлять.", reply_markup=keyboard([("Пропустить", "wellbeing_skip")]))
         elif kind == "wellbeing_note":
             await make_draft(message, uid, state, "wellbeing", {"score": values["score"], "energy_score": values.get("energy_score"), "note": "" if text == "-" else text})
@@ -843,7 +907,7 @@ async def receive_value(message, state):
             for clock in times:
                 if len(clock) != 5 or time.fromisoformat(clock).tzinfo is not None: raise ValueError()
             course = {**values["course_data"], "start_date": start, "end_date": end, **schedule, "times": times}
-            await form(message, state, "course_supply", "Запас: количество | расход на один приём | единица (одна и та же). Например: 20 | 1 | таблетка. Если неизвестно, отправьте -. Бот не переводит единицы и не рассчитывает дозу.", course_data=course)
+            await form(message, state, "course_supply", "Какой запас у вас есть и сколько уходит на один приём по вашей схеме? Укажите единицу: например, таблетки. Если не знаете, можно пропустить. Бот не переводит единицы и не рассчитывает дозу.", course_data=course)
         elif kind == "course_supply":
             course = values["course_data"]
             if text != "-":
@@ -857,15 +921,15 @@ async def receive_value(message, state):
                 weight, reps = parts
             else:
                 name, weight, reps = parts
-            result = await api("/workspace/workout/set", {"telegram_user_id": uid, "entry_id": values["workout_id"], "request_key": request_key(message), "exercise_set": {"exercise": name, "weight_kg": number(weight), "reps": int(reps)}})
-            next_name = next_exercise(result["entry"], values.get("program_day", 0))
-            await state.update_data(planned_exercise=next_name)
-            prompt = f"Следующее: {next_name}. Вес | повторы" if next_name else "Следующий подход: упражнение | вес | повторы"
-            await message.answer(f"Подход сохранён. Всего: {len(result['entry']['sets'])}.\n{prompt}", reply_markup=keyboard([("Завершить", f"workout_finish:{values['workout_id']}"), ("Длительность", f"workout_duration:{values['workout_id']}")]))
+            pending = {"exercise": name, "weight_kg": number(weight), "reps": int(reps)}
+            receipt = str(message.message_id)
+            await state.set_state(None)
+            await state.update_data(pending_set=pending, set_receipt=receipt, set_request_key=request_key(message))
+            await message.answer(f"{name}: {fmt(pending['weight_kg'])} кг × {pending['reps']}. Записать подход?", parse_mode=None,
+                reply_markup=keyboard([("Да, записать", "set_confirm:"+receipt)], [("Изменить", "set_edit:"+receipt)]))
         elif kind == "workout_duration":
-            result = await api("/workspace/workout/finish", {"telegram_user_id": uid, "entry_id": values["workout_id"], "duration_minutes": number(text)})
-            await state.clear()
-            await workout_result(message, result["entry"])
+            await review_input(message, state, "workout_duration", {"entry_id": values["workout_id"], "duration_minutes": number(text)},
+                f"Тренировка длилась {fmt(number(text))} минут. Завершить и сохранить?")
         elif kind == "reminder":
             data = await api("/dashboard", {"telegram_user_id": uid})
             settings = reminder_payload(data["settings"])
@@ -877,16 +941,12 @@ async def receive_value(message, state):
                 settings.update(weekday=int(day)-1, weekly=clock)
             else:
                 settings[reminder] = None if text == "-" else text
-            await api("/reminder/options", {"telegram_user_id": uid, **settings})
-            await state.clear()
-            await reminders_view(message, uid)
+            change = {k: settings[k] for k in ("weekday", "weekly")} if reminder == "weekly" else {"inactivity_days" if reminder == "inactivity" else reminder: settings["inactivity_days" if reminder == "inactivity" else reminder]}
+            label = "выключить" if text == "-" else (f"{DAYS[settings['weekday']]} в {settings['weekly']}" if reminder == "weekly" else f"через {settings['inactivity_days']} дн." if reminder == "inactivity" else settings[reminder])
+            await review_input(message, state, "reminder", change, "Напоминание: "+label+". Сохранить?")
         else:
             await state.clear()
             await message.answer("Откройте раздел заново.", reply_markup=keyboard())
     except (ValueError, KeyError, BridgeError) as error:
-        detail = str(error) if isinstance(error, BridgeError) else "Проверьте формат и значения и попробуйте ещё раз."
-        examples = {"target":"Пример: 2000 100 70 240 или только 2000.", "program_sets":"Подходы: целое число от 1 до 30, например 3.",
-            "program_reps":"Повторы: целое число от 1 до 200, например 10.", "set_weight":"Вес: число от 0 до 1000 кг, например 20.",
-            "set_reps":"Повторы: целое число от 1 до 1000, например 10.", "reminder":"Время: ЧЧ:ММ, например 08:00. Для отключения: -.",
-            "measurement":"Пример: 80 95 100; неизвестное значение: -.", "workout_duration":"Длительность в минутах, например 45."}
-        await message.answer(detail+"\n\n"+values.get("form_prompt", "")+"\n"+examples.get(kind, ""), parse_mode=None, reply_markup=keyboard([("Отмена", "menu")]))
+        detail = str(error) if isinstance(error, BridgeError) and error.status != 422 else "Не удалось понять ответ или сохранить эти значения. Ответьте, пожалуйста, своими словами."
+        await message.answer(detail+"\n\n"+values.get("form_prompt", ""), parse_mode=None, reply_markup=keyboard([("Отмена", "menu")]))

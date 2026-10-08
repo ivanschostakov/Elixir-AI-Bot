@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import logging
+import secrets
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -236,6 +237,9 @@ async def mentor_action(query:CallbackQuery,state:FSMContext,professor_bot=None,
 async def perform_action(query,state,message,professor_bot=None,professor_client=None,expert_client=None):
     uid=query.from_user.id;action=query.data.removeprefix("mentor:")
     await query.answer()
+    # Navigation invalidates in-flight extraction; only its own review buttons keep a pending write.
+    await state.update_data(form_token=secrets.token_hex(8),
+        **({} if action.startswith(("input_save:", "input_edit:")) else {"pending_input": None}))
     if action=="leave":
         from src.bot.keyboards import user_keyboards
         from src.bot.texts import user_texts
@@ -258,8 +262,8 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
         if action=="meal" or action.startswith("meal:"):
             return await ask(message,uid,"Отправьте фотографию еды, голосовое сообщение, видеокружок или напишите, что вы съели. Например: «гречка 150 г, куриная грудка 200 г и овощной салат».\nДля кружка используйте кнопку видео в Telegram. Медиа доступны в режиме ИИ-профессора.")
         if action=="weight":
-            await state.set_state(WeightInput.value)
-            return await message.answer("Сколько вы сейчас весите, в килограммах? Например: 100 или 75,5.", reply_markup=back_keyboard(), parse_mode=None)
+            from .mentor_flows import form
+            return await form(message, state, "weight", "Сколько вы сейчас весите? Можно ответить своими словами.")
         if action=="question": return await ask(message,uid,"Что хотите обсудить?")
         if action in {"nutrition","history","data"}:
             data=await api("/dashboard",{"telegram_user_id":uid})
@@ -296,8 +300,8 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
             await api("/reminder/settings",{"telegram_user_id":uid,"timezone":settings['timezone'],"daily_time":None if value=='off' else value})
             return await show_reminders(message,uid)
         if action=="timezone":
-            await state.set_state(SettingsInput.timezone)
-            return await message.answer("Введите часовой пояс, например Europe/Moscow, Asia/Yekaterinburg или America/Chicago.",reply_markup=back_keyboard())
+            from .mentor_flows import form
+            return await form(message, state, "timezone", "В каком городе или часовом поясе вы живёте? Это нужно для напоминаний.")
         await message.answer("Эта старая кнопка больше не используется. Выберите действие в меню.",reply_markup=menu())
     except (BridgeError,ValueError) as error:
         text=str(error) if isinstance(error,BridgeError) else "Не удалось обработать действие. Откройте меню и попробуйте снова."
@@ -305,51 +309,21 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
 
 
 @router.message(WeightInput.value)
-async def save_weight(message: Message, state: FSMContext):
-    if not mentor_enabled(message.from_user.id):
-        await state.clear()
-        return
-    import re
-    text = (message.text or "").strip()
-    match = re.fullmatch(r"(\d+(?:[.,]\d+)?)\s*(?:кг|kg)?", text, re.I)
-    if not match or not 0 < float(match[1].replace(",", ".")) <= 500:
-        return await message.answer("Напишите вес в кг от 0 до 500, например: 100 или 75,5.", reply_markup=back_keyboard(), parse_mode=None)
-    weight = float(match[1].replace(",", "."))
-    try:
-        saved = await api("/dashboard", {"telegram_user_id": message.from_user.id})
-        await api("/profile/update", {"telegram_user_id": message.from_user.id, "expected_version": saved["version"],
-            "request_key": f"weight:{message.chat.id}:{message.message_id}", "source_text": text, "evidence": text,
-            "patch": {"current_weight_kg": weight}})
-    except BridgeError as error:
-        return await message.answer(str(error)+"\nПовторите вес, например: 75,5.", reply_markup=back_keyboard(), parse_mode=None)
-    await state.clear()
-    await message.answer(f"Вес {fmt(weight)} кг записан.", parse_mode=None, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [button("Последние измерения", "history")], [button("← Меню наставника", "menu")]]))
+async def save_weight(message: Message, state: FSMContext, professor_client=None):
+    from .mentor_flows import receive
+    await state.update_data(form_kind="weight", form_prompt="Сколько вы сейчас весите?")
+    await receive(message, state, professor_client)
 
 
 @router.message(SettingsInput.timezone)
-async def timezone_input(message:Message,state:FSMContext):
-    from .mentor_panel import reply_panel
-    panel = await reply_panel(message, state)
-    try:
-        await save_timezone(panel if panel is not None else message, state)
-    finally:
-        if panel is not None: await panel.flush()
+async def timezone_input(message:Message,state:FSMContext,professor_client=None):
+    await save_timezone(message, state, professor_client)
 
 
-async def save_timezone(message,state):
-    if not mentor_enabled(message.from_user.id):
-        await state.clear()
-        return
-    value=(message.text or "").strip()
-    try:
-        ZoneInfo(value)
-        settings=(await api("/dashboard",{"telegram_user_id":message.from_user.id}))['settings']
-        from .mentor_flows import reminder_payload
-        await api("/reminder/options",{**reminder_payload(settings),"telegram_user_id":message.from_user.id,"timezone":value})
-    except (ValueError,KeyError,BridgeError):
-        return await message.answer("Не удалось сохранить часовой пояс. Проверьте название, например Europe/Moscow, и попробуйте снова.",reply_markup=back_keyboard())
-    await state.clear();await show_reminders(message,message.from_user.id)
+async def save_timezone(message,state,professor_client=None):
+    from .mentor_flows import receive
+    await state.update_data(form_kind="timezone", form_prompt="В каком городе или часовом поясе вы живёте?")
+    await receive(message, state, professor_client)
 
 
 async def reminder_loop(bot):

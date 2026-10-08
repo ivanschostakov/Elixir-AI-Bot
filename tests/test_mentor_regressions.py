@@ -70,28 +70,37 @@ def test_navigation_from_an_ai_answer_never_overwrites_that_answer():
 
 
 @pytest.mark.parametrize("text,expected", [("100",100), ("75,5",75.5), ("75.5 кг",75.5)])
-def test_weight_is_saved_without_ai_and_confirmation_is_specific(monkeypatch, text, expected):
-    api = AsyncMock(side_effect=[{"version":2}, {"ok":True}])
-    monkeypatch.setattr(mentor, "api", api)
+def test_weight_requires_review_and_confirmation_is_specific(monkeypatch, text, expected):
+    api = AsyncMock(return_value={"ok":True})
+    monkeypatch.setattr(f, "api", api)
+    monkeypatch.setattr(f, "parse_step", AsyncMock(return_value=str(expected)))
     msg, state = message(text), State()
+    state.values["form_profile_version"] = 2
     asyncio.run(mentor.save_weight(msg, state))
-    payload = api.await_args_list[1].args[1]
+    api.assert_not_awaited()
+    token = state.values["pending_input"]["token"]
+    asyncio.run(f.confirm_input(msg, 123, state, "input_save:"+token))
+    payload = api.await_args.args[1]
     assert payload["patch"] == {"current_weight_kg":expected}
-    assert payload["source_text"] == text and payload["expected_version"] == 2
+    assert text in payload["source_text"] and payload["expected_version"] == 2
     assert "кг записан" in msg.answer.await_args.args[0]
     assert any(b.callback_data == "mentor:history" for r in msg.answer.await_args.kwargs["reply_markup"].inline_keyboard for b in r)
 
 
 @pytest.mark.parametrize("text", ["не знаю", "5000", "nan", "-12"])
 def test_bad_weight_keeps_the_current_step(monkeypatch, text):
+    from src.ai import mentor_input as inputs
     api = AsyncMock()
-    monkeypatch.setattr(mentor, "api", api)
+    monkeypatch.setattr(f, "api", api)
+    monkeypatch.setattr(inputs, "api", AsyncMock(return_value=dashboard()))
+    client = SimpleNamespace(responses=SimpleNamespace(parse=AsyncMock(return_value=SimpleNamespace(
+        status="completed", output_parsed={"data": {"weight": None}, "clarification": "Сколько вы сейчас весите?", "skip": False}))))
     state, msg = State(), message(text)
     state.state = mentor.WeightInput.value
-    asyncio.run(mentor.save_weight(msg, state))
+    asyncio.run(mentor.save_weight(msg, state, client))
     api.assert_not_awaited()
     assert state.state == mentor.WeightInput.value
-    assert "75,5" in msg.answer.await_args.args[0]
+    assert "Сколько вы сейчас весите" in msg.answer.await_args.args[0]
 
 
 def test_target_preflight_happens_before_eligibility_and_activity(monkeypatch):

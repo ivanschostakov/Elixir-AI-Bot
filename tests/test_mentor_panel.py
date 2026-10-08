@@ -105,6 +105,8 @@ def test_typed_workout_steps_send_below_user_and_keep_request_identity(monkeypat
     from test_telegram_flows import State as FormState
     monkeypatch.setattr(telegram_mentor.config, "DATA_DIR", tmp_path)
     telegram_mentor.set_mentor_enabled(123, True)
+    async def parsed(message, state, kind, client): return message.text
+    monkeypatch.setattr(f, "parse_step", parsed)
     async def run():
         bot = SimpleNamespace(edit_message_text=AsyncMock(), send_message=AsyncMock())
         msg = SimpleNamespace(message_id=900, from_user=SimpleNamespace(id=123), chat=SimpleNamespace(id=123),

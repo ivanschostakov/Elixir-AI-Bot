@@ -167,24 +167,26 @@ def test_repeat_meal_is_a_server_draft_not_a_fake_saved_message(monkeypatch):
     assert kb.inline_keyboard[0][0].callback_data == "mentor:meal_confirm:9"
 
 
-def test_workout_set_message_persists_before_success(monkeypatch):
+def test_workout_set_message_is_reviewed_before_persistence(monkeypatch):
     t.set_mentor_enabled(123, True)
     call = AsyncMock(return_value={"entry": {"sets": [{"exercise": "Присед", "weight_kg": 40, "reps": 10}]}})
     monkeypatch.setattr(f, "api", call)
+    monkeypatch.setattr(f, "parse_step", AsyncMock(return_value="Присед | 40 | 10"))
     message = SimpleNamespace(from_user=SimpleNamespace(id=123), chat=SimpleNamespace(id=123), message_id=7,
         text="Присед | 40 | 10", answer=AsyncMock())
     state = State(form_kind="workout_set", workout_id=9)
     asyncio.run(f.receive(message, state))
-    path, body = call.await_args.args
-    assert path == "/workspace/workout/set" and body["exercise_set"]["weight_kg"] == 40
-    assert body["telegram_user_id"] == 123 and body["entry_id"] == 9
-    assert "сохранён" in message.answer.await_args.args[0]
+    call.assert_not_awaited()
+    assert state.values["pending_set"] == {"exercise": "Присед", "weight_kg": 40, "reps": 10}
+    assert "Записать подход" in message.answer.await_args.args[0]
 
 
 def test_workout_dialogue_requires_weight_reps_and_confirmation(monkeypatch):
     t.set_mentor_enabled(123, True)
     call = AsyncMock(return_value=dashboard())
     monkeypatch.setattr(f, "api", call)
+    async def parsed(message, state, kind, client): return message.text
+    monkeypatch.setattr(f, "parse_step", parsed)
     message = SimpleNamespace(from_user=SimpleNamespace(id=123), chat=SimpleNamespace(id=123), message_id=7,
         text="40", answer=AsyncMock(), edit_reply_markup=AsyncMock())
     state = State(form_kind="set_weight", planned_exercise="Присед", workout_id=9)
@@ -218,12 +220,13 @@ def test_home_keyboard_matches_requested_rows():
 def test_failed_form_does_not_claim_save(monkeypatch):
     t.set_mentor_enabled(123, True)
     monkeypatch.setattr(f, "api", AsyncMock(side_effect=t.BridgeError("Сервис недоступен")))
+    monkeypatch.setattr(f, "parse_step", AsyncMock(return_value="2000 100 70 240"))
     message = SimpleNamespace(from_user=SimpleNamespace(id=123), chat=SimpleNamespace(id=123), message_id=7,
         text="2000 100 70 240", answer=AsyncMock())
     state = State(form_kind="target")
     asyncio.run(f.receive(message, state))
     assert message.answer.await_args.args[0].startswith("Сервис недоступен")
-    assert "Пример:" in message.answer.await_args.args[0]
+    assert "Пример:" not in message.answer.await_args.args[0]
     assert state.values["form_kind"] == "target"
 
 
