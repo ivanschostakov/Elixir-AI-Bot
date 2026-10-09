@@ -1,6 +1,5 @@
-"""One editable navigation card, with bounded text pages for long diaries."""
+"""Edit clicked menu cards; open fresh navigation below conversational replies."""
 import secrets
-from types import SimpleNamespace
 
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
@@ -158,37 +157,16 @@ class MentorPanel:
         saved = self.saved_card if self.saved_card is not None else (await self.state.get_data()).get("mentor_panel", {})
         cards = [saved, *self.cards]
         own = next((c for c in cards if c.get("message_id") == self.target.message_id
-            and c.get("chat_id") == self.message.chat.id and c.get("kind", "navigation") != "receipt"), None)
-        if not own and not (self.action == "open" and is_main_menu(self.message)) and not is_mentor_menu(self.message):
-            # AI prose and receipts remain history; reuse a separate navigation card.
-            nav = next((c for c in reversed(self.cards) if c.get("chat_id") == self.message.chat.id
-                and c.get("kind") == "navigation"), None)
-            if nav and getattr(self.message, "bot", None):
-                self.target = StoredCard(self.message.bot, nav)
-            else:
-                self.target = await self.message.answer("Открываю раздел…", parse_mode=None)
+            and c.get("chat_id") == self.message.chat.id and c.get("kind", "navigation") in {"navigation", "form"}), None)
+        send = not own and not (self.action == "open" and is_main_menu(self.message)) and not is_mentor_menu(self.message)
         token = secrets.token_hex(4)
         try:
-            await show_page(self.target, pages, token, 0, root=self.root)
+            self.target = await show_page(self.target, pages, token, 0, root=self.root, send=send)
         except TelegramBadRequest as error:
             if not missing_card(error):
                 raise
-            self.target = await self.message.answer("Открываю раздел…", parse_mode=None)
-            await show_page(self.target, pages, token, 0, root=self.root)
+            self.target = await show_page(self.message, pages, token, 0, root=self.root, send=True)
         await remember_card(self.state, self.target, kind=self.kind, token=token, pages=pages, root=self.root)
-
-
-class StoredCard:
-    def __init__(self, bot, saved):
-        self.bot, self.saved = bot, saved
-        self.message_id, self.photo = saved["message_id"], saved.get("photo", False)
-        self.chat = SimpleNamespace(id=saved["chat_id"])
-
-    async def edit_text(self, text, **kwargs):
-        return await self.bot.edit_message_text(text=text, chat_id=self.saved["chat_id"], message_id=self.message_id, **kwargs)
-
-    async def edit_caption(self, **kwargs):
-        return await self.bot.edit_message_caption(chat_id=self.saved["chat_id"], message_id=self.message_id, **kwargs)
 
 
 class ReplyCards:
@@ -252,7 +230,7 @@ async def show_media(message, state, photo, **kwargs):
     return sent
 
 
-async def show_page(message, pages, token, index, *, root=False):
+async def show_page(message, pages, token, index, *, root=False, send=False):
     page = pages[index]
     rows, seen, home = [], set(), []
     for row in page["rows"]:
@@ -278,7 +256,11 @@ async def show_page(message, pages, token, index, *, root=False):
     if not root:
         rows.append(home or [InlineKeyboardButton(text="← Меню наставника", callback_data="mentor:menu")])
     text = page["text"] + (f"\n\n{index+1} / {len(pages)}" if len(pages) > 1 else "")
-    await edit_panel(message, text, InlineKeyboardMarkup(inline_keyboard=rows))
+    markup = InlineKeyboardMarkup(inline_keyboard=rows)
+    if send:
+        return await message.answer(text, reply_markup=markup, parse_mode=None)
+    await edit_panel(message, text, markup)
+    return message
 
 
 async def navigate_page(query, state):

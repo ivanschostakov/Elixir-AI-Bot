@@ -263,17 +263,70 @@ def test_receipt_button_does_not_invalidate_another_pending_input(monkeypatch):
     msg.answer.assert_not_awaited()
 
 
-def test_navigation_from_ai_answer_reuses_a_separate_menu():
+def test_navigation_from_ai_answer_sends_below_it_without_reusing_an_older_menu():
     async def run():
         msg = message(text="Do not overwrite this answer")
         state = State(mentor_cards=[{"message_id":4, "chat_id":123, "kind":"navigation"}])
         panel = MentorPanel(msg, state, saved_card={}, cards=state.values["mentor_cards"])
         await panel.answer("Питание")
         await panel.flush()
-        msg.answer.assert_not_awaited()
+        msg.answer.assert_awaited_once()
+        assert msg.answer.await_args.args[0] == "Питание"
         msg.edit_text.assert_not_awaited()
-        assert msg.bot.edit_message_text.await_args.kwargs["message_id"] == 4
+        msg.bot.edit_message_text.assert_not_awaited()
+        msg.sent.edit_text.assert_not_awaited()
+        assert state.values["mentor_panel"]["message_id"] == msg.sent.message_id
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("kind", [None, "answer", "receipt"])
+@pytest.mark.parametrize("photo", [False, True])
+def test_menu_button_on_conversation_or_receipt_sends_a_fresh_menu(monkeypatch, kind, photo):
+    apis(monkeypatch)
+    msg = message(text="Сохранить этот ответ в истории", markup=mentor.back_keyboard())
+    if photo:
+        msg.photo, msg.caption = [object()], msg.text
+    cards = [{"message_id":4, "chat_id":123, "kind":"navigation"}]
+    if kind:
+        cards.append({"message_id":msg.message_id, "chat_id":123, "kind":kind})
+    state = State(mentor_panel=cards[-1], mentor_cards=cards)
+    asyncio.run(mentor.mentor_action(query("menu", msg), state))
+    msg.answer.assert_awaited_once()
+    assert msg.answer.await_args.args[0].startswith("🌿 Наставник ElixirPeptide")
+    assert "mentor:food" in actions(msg.answer.await_args.kwargs["reply_markup"])
+    msg.edit_text.assert_not_awaited()
+    msg.edit_caption.assert_not_awaited()
+    msg.edit_reply_markup.assert_not_awaited()
+    msg.bot.edit_message_text.assert_not_awaited()
+    msg.bot.edit_message_caption.assert_not_awaited()
+    assert state.values["mentor_panel"]["message_id"] == msg.sent.message_id
+
+
+def test_navigation_inside_the_new_menu_edits_only_that_new_menu(monkeypatch):
+    apis(monkeypatch)
+    msg = message(text="AI answer", markup=mentor.back_keyboard())
+    state = State(mentor_panel={"message_id":4, "chat_id":123, "kind":"navigation"})
+    asyncio.run(mentor.mentor_action(query("menu", msg), state))
+    fresh = msg.sent
+    asyncio.run(mentor.mentor_action(query("food", fresh), state))
+    fresh.edit_text.assert_awaited_once()
+    fresh.answer.assert_not_awaited()
+    msg.answer.assert_awaited_once()
+    msg.edit_text.assert_not_awaited()
+    msg.bot.edit_message_text.assert_not_awaited()
+
+
+def test_clicking_an_older_menu_never_edits_the_newer_menu(monkeypatch):
+    apis(monkeypatch)
+    msg = message(mid=4, markup=mentor.menu())
+    state = State(mentor_panel={"message_id":20, "chat_id":123, "kind":"navigation"},
+        mentor_cards=[{"message_id":4, "chat_id":123, "kind":"navigation"},
+            {"message_id":20, "chat_id":123, "kind":"navigation"}])
+    asyncio.run(mentor.mentor_action(query("food", msg), state))
+    msg.edit_text.assert_awaited_once()
+    msg.answer.assert_not_awaited()
+    msg.bot.edit_message_text.assert_not_awaited()
+    assert state.values["mentor_panel"]["message_id"] == 4
 
 
 def test_form_answer_retires_old_question_buttons_but_does_not_edit_its_text():

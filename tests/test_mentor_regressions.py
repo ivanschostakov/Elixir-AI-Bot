@@ -64,7 +64,9 @@ def test_navigation_from_an_ai_answer_never_overwrites_that_answer():
         await panel.answer("Новое меню")
         await panel.flush()
         old.edit_text.assert_not_awaited()
-        new.edit_text.assert_awaited_once()
+        old.answer.assert_awaited_once()
+        assert old.answer.await_args.args[0] == "Новое меню"
+        new.edit_text.assert_not_awaited()
         assert state.values["mentor_panel"]["message_id"] == 13
     asyncio.run(run())
 
