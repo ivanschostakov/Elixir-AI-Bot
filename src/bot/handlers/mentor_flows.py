@@ -118,6 +118,7 @@ async def converse(message, state, bot, professor_client, expert_client):
 
 async def remember_response(state, response):
     entries = [response[k] for k in ("meal_draft", "target_draft", "program_draft") if response.get(k)]
+    entries += response.get("record_drafts") or []
     if not entries:
         await state.update_data(text_confirmation_ready=False)
         return
@@ -127,6 +128,9 @@ async def remember_response(state, response):
     for entry in entries:
         merged[entry["id"]] = entry
     await state.update_data(pending_reviews=list(merged.values())[-10:], text_confirmation_ready=True)
+    if response.get("record_drafts"):
+        response["text"] = response.get("text", "")+"\n\nПроверьте запись перед сохранением:\n"+"\n\n".join(
+            draft_text(e) for e in response["record_drafts"])
 
 
 async def pending_text(message, state, client=None, *, professor_bot=None, expert_client=None):
@@ -184,14 +188,25 @@ async def pending_text_locked(message, state, client=None, *, professor_bot=None
         return True
     entry = reviews[0]
     if correction:
+        if entry.get("kind") in {"program", "workout", "activity_log", "measurement", "wellbeing"}:
+            from src.ai.telegram_mentor import save_opening_question
+            save_opening_question(uid, f"Человек исправляет черновик {entry['kind']} №{entry['id']}. "
+                "Прочитай его через get_mentor_record, сохрани неизменённые данные и подготовь новый черновик с replaces_id. Нужно новое подтверждение.")
+            await state.update_data(text_confirmation_ready=False)
+            return False
         if await edit_record(message, uid, state, entry["id"], entry.get("kind", "meal"), silent=True):
             await receive_value(message, state, client, professor_bot=professor_bot, expert_client=expert_client)
         else:
             return False
         return True
     path = "/journal/action" if entry.get("kind", "meal") == "meal" else "/workspace/action"
-    await api(path, {"telegram_user_id":uid, "entry_id":entry["id"], "action":"confirm" if yes else "cancel"})
+    result = await api(path, {"telegram_user_id":uid, "entry_id":entry["id"], "action":"confirm" if yes else "cancel"})
     await state.update_data(pending_reviews=[])
+    if entry.get("kind") in {"workout", "activity_log", "measurement", "wellbeing"}:
+        saved = result["entry"]
+        await message.answer("Запись сохранена.\n\n"+draft_text(saved) if saved["status"] == "confirmed" else "Черновик отменён.",
+            parse_mode=None, reply_markup=keyboard([("Открыть результаты", "workouts" if entry["kind"] in {"workout", "activity_log"} else "progress")]))
+        return True
     await message.answer("Записано: "+entry.get("name", {"measurement":"замеры", "wellbeing":"самочувствие", "target":"норма питания", "program":"программа"}.get(entry.get("kind"), "запись"))+"." if yes else "Не сохраняю.", reply_markup=keyboard())
     return True
 
@@ -235,6 +250,11 @@ def draft_text(entry):
         return f"Самочувствие: {entry['score']}/5"+(f"\nЭнергия: {entry['energy_score']}/5" if entry.get('energy_score') is not None else "")+f"\n{entry.get('note', '')}"
     if kind == "measurement":
         return "Замеры\n"+"\n".join(f"{label}: {fmt(entry[key])} см" for key, label in [("waist_cm", "Талия"), ("chest_cm", "Грудь"), ("hips_cm", "Бёдра")] if entry.get(key) is not None)+ ("\nЛичное фото приложено." if entry.get("photo_file_id") else "")
+    if kind == "workout":
+        return "Выполненная силовая тренировка\n"+"\n".join(
+            f"{s['exercise']}: {fmt(s['weight_kg'])} кг × {s['reps']}" for s in entry["sets"])+f"\nДлительность: {fmt(entry['duration_minutes'])} мин"
+    if kind == "activity_log":
+        return f"Физическая активность\n{entry['name']}\nДлительность: {fmt(entry['duration_minutes'])} мин\nОтдельная запись, не изменение программы тренировок."
     return "Проверьте запись перед сохранением."
 
 
@@ -331,6 +351,8 @@ def today_view(data):
     exercises = w.get("today_exercises", [])
     lines.append("\nТренировка: "+(", ".join(dict.fromkeys(e["name"] for e in exercises)) if exercises else "в программе на сегодня нет"))
     lines.append("Записанных тренировок: "+str(len(w.get("today_workouts", []))))
+    if w.get("today_activities"):
+        lines.append("Другая активность: "+"; ".join(f"{e['name']} — {fmt(e['duration_minutes'])} мин" for e in w["today_activities"]))
     events = w.get("today_course", [])
     lines.append("\nКурс: "+("сегодня нет приёмов по сохранённому расписанию" if not events else ""))
     zone = ZoneInfo(data["settings"]["timezone"])
@@ -368,6 +390,8 @@ def home_view(data):
     calories = fmt(data.get("totals", {}).get("kcal", 0))
     lines.append(f"Питание: ≈ {calories}" + (f" из {fmt(target['kcal'])} ккал" if target.get("kcal") else " ккал; норма не задана"))
     lines.append("Тренировка: "+("завершена" if w.get("today_workouts") else "запланирована на сегодня" if w.get("today_exercises") else "на сегодня не запланирована"))
+    if w.get("today_activities"):
+        lines.append("Другая активность: "+"; ".join(f"{e['name']} — {fmt(e['duration_minutes'])} мин" for e in w["today_activities"]))
     now = datetime.fromisoformat(data["now"]) if data.get("now") else None
     events = [e for c in w.get("courses", []) for e in c.get("calendar", [])
         if e["status"] == "pending" and now and datetime.fromisoformat(e["occurred_at"]) >= now]
@@ -494,6 +518,9 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
     if not gates.get(section, True) or section in closed:
         await message.answer("Раздел временно отключён.", reply_markup=keyboard())
         return True
+    from .mentor_dialogue import dispatch_dialogue
+    if await dispatch_dialogue(query, state, action, message, professor_bot, professor_client, expert_client):
+        return True
     if root in {"input_save", "input_edit"}:
         await confirm_input(message, uid, state, action)
     elif action == "food_lookup":
@@ -601,7 +628,8 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         week = w.get("weekly", {})
         lines = ["Результаты тренировок за неделю", f"Записано тренировок: {week.get('workouts', 0)}",
             f"По программе: {week.get('planned_workouts', 0)}", f"Длительность: {fmt(week.get('duration_minutes'))} мин",
-            f"Объём: {fmt(week.get('volume_kg'))} кг", "",
+            f"Объём: {fmt(week.get('volume_kg'))} кг",
+            f"Другая активность: {week.get('activities', 0)} записей, {fmt(week.get('activity_duration_minutes', 0))} мин", "",
             "Для сравнения прогресса записывайте вес и повторы в тех же упражнениях. Общий объём сам по себе не показывает рост силы."
             if week.get("workouts") else "Пока нет записанных тренировок. После следующей тренировки сохраните подходы — будет с чем сравнивать."]
         await message.answer("\n".join(lines), parse_mode=None, reply_markup=keyboard([("🏋️ Тренировки", "workouts")]))
@@ -673,8 +701,7 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
             raise BridgeError("Откройте текущую тренировку.")
         await form(message, state, "workout_set", edit_question("workout_set"), known=values.get("pending_set") or {}, editing=True, pending_set=None)
     elif root == "workout_finish":
-        result = await api("/workspace/workout/finish", {"telegram_user_id": uid, "entry_id": int(action.split(":")[1])})
-        await workout_result(message, result["entry"])
+        await form(message, state, "workout_duration", QUESTIONS["workout_duration"], workout_id=int(action.split(":")[1]))
     elif root == "workout_duration":
         await form(message, state, "workout_duration", QUESTIONS["workout_duration"], workout_id=int(action.split(":")[1]))
     elif action == "course" or root in {"course_calendar", "course_supply"}:
@@ -745,8 +772,14 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         text = {"confirmed": "Запись сохранена.", "cancelled": "Черновик отменён.", "stopped": "Расписание остановлено. История сохранена."}[entry["status"]]
         if entry["status"] == "confirmed":
             text = {"target": f"Норма {fmt(entry.get('kcal'))} ккал сохранена.", "program": "Программа тренировок сохранена.",
-                "measurement": "Фото прогресса сохранено." if entry.get("photo_file_id") else "Замеры сохранены.", "wellbeing": "Самочувствие сохранено.", "course": "Существующая схема курса сохранена."}.get(kind, text)
-        await complete_card(message, text, reply_markup=keyboard([("Открыть результаты", {"target":"nutrition", "program":"workouts", "course":"course"}.get(kind, "progress"))]))
+                "measurement": "Фото прогресса сохранено." if entry.get("photo_file_id") else "Замеры сохранены.", "wellbeing": "Самочувствие сохранено.", "course": "Существующая схема курса сохранена.",
+                "workout": "Тренировка записана.", "activity_log": "Активность записана отдельно от тренировочной программы."}.get(kind, text)
+            if kind in {"workout", "activity_log", "measurement", "wellbeing"}:
+                text += "\n\n"+draft_text(entry)
+        if kind in {"workout", "activity_log", "measurement", "wellbeing"} and isinstance(message, MentorPanel):
+            await message.complete(text, replace=True, reply_markup=keyboard([("Открыть результаты", "workouts" if kind in {"workout", "activity_log"} else "progress")]))
+        else:
+            await complete_card(message, text, reply_markup=keyboard([("Открыть результаты", {"target":"nutrition", "program":"workouts", "course":"course"}.get(kind, "progress"))]))
     elif root == "record_edit":
         _, kind, entry_id = action.split(":")
         await state.update_data(replace_kind="measurement" if kind == "progress_photo" else kind, replace_id=int(entry_id))

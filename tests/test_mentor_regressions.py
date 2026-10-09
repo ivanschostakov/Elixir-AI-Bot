@@ -141,30 +141,34 @@ def test_ai_target_uses_the_same_server_preview_and_returns_an_unconfirmed_draft
     assert "mentor:record:confirm:71" in actions
 
 
-def test_program_builder_and_stale_repetition_button(monkeypatch):
+def test_program_day_uses_conversation_and_rejects_stale_repetition_button(monkeypatch):
+    from src.bot.handlers import mentor
+    dialogue=AsyncMock()
+    monkeypatch.setattr(mentor, "run_ai_action", dialogue)
     monkeypatch.setattr(f, "api", AsyncMock(return_value=dashboard()))
     monkeypatch.setattr(f, "parse_step", AsyncMock(return_value="Присед"))
     async def run():
         state, msg = State(program_exercises=[]), message("Присед")
         await f.dispatch(query("program_day:0",msg),state,"program_day:0",None,None,None)
-        assert "Понедельник" in msg.answer.await_args.args[0]
-        await f.receive_value(msg,state)
-        await f.dispatch(query("program_sets:3",msg),state,"program_sets:3",None,None,None)
-        await f.dispatch(query("program_reps:10",msg),state,"program_reps:10",None,None,None)
-        assert state.values["program_exercises"] == [{"weekday":0,"name":"Присед","sets":3,"reps":10}]
+        assert "Понедельник" in dialogue.await_args.args[-1]
+        assert "Сохрани остальные дни" in dialogue.await_args.args[-1]
+        assert not state.values.get("form_kind")
         with pytest.raises(t.BridgeError):
             await f.dispatch(query("program_reps:10",msg),state,"program_reps:10",None,None,None)
-        assert len(state.values["program_exercises"]) == 1
+        assert state.values["program_exercises"] == []
     asyncio.run(run())
 
 
 def test_empty_workout_is_not_automatically_started(monkeypatch):
+    from src.bot.handlers import mentor
+    dialogue=AsyncMock()
+    monkeypatch.setattr(mentor, "run_ai_action", dialogue)
     api = AsyncMock(return_value=dashboard())
     monkeypatch.setattr(f, "api", api)
     msg = dispatch("workout_start")
     assert api.await_count == 1
-    actions = [b.callback_data for r in msg.answer.await_args.kwargs["reply_markup"].inline_keyboard for b in r]
-    assert "mentor:program" in actions and "mentor:workout_free" in actions
+    assert "Не считай план выполненным" in dialogue.await_args.args[-1]
+    assert "не запускай таймер" in dialogue.await_args.args[-1]
 
 
 def test_energy_buttons_and_optional_note(monkeypatch):

@@ -211,11 +211,15 @@ def test_form_prompts_do_not_require_delimiters_or_technical_time_format(monkeyp
         for action in ("target","measurement","course","program_text"):
             state=State()
             if action == "program_text":
+                from src.bot.handlers import mentor
+                dialogue=AsyncMock()
+                monkeypatch.setattr(mentor,"run_ai_action",dialogue)
                 monkeypatch.setattr(f,"api",AsyncMock(return_value=dashboard()))
                 query=SimpleNamespace(from_user=msg.from_user,message=msg,id="test")
                 await f.dispatch(query,state,action,None,None,None)
+                text=dialogue.await_args.args[-1]
             else: await f.start_form(msg,123,state,action)
-            text=msg.answer.await_args.args[0]
+            if action != "program_text": text=msg.answer.await_args.args[0]
             assert "|" not in text and "HH:MM" not in text and "пн=1" not in text
     asyncio.run(run())
 

@@ -80,6 +80,30 @@ class MentorPanel:
             rows += reply_markup.inline_keyboard
         markup = InlineKeyboardMarkup(inline_keyboard=rows)
         if replace:
+            limit = 900 if getattr(self.message, "photo", None) else 3500
+            if len(text.encode("utf-16-le")) // 2 > limit:
+                pages, chunk, units = [], [], 0
+                serialized = markup.model_dump(mode="json")["inline_keyboard"]
+                for char in text:
+                    size = 2 if ord(char) > 0xffff else 1
+                    if units+size > limit:
+                        pages.append({"text": "".join(chunk), "rows": serialized})
+                        chunk, units = [], 0
+                    chunk.append(char)
+                    units += size
+                pages.append({"text": "".join(chunk), "rows": serialized})
+                token = secrets.token_hex(4)
+                receipt = self.message
+                try:
+                    await show_page(receipt, pages, token, 0)
+                except TelegramBadRequest as error:
+                    if not missing_card(error):
+                        raise
+                    receipt = await self.message.answer(pages[0]["text"], parse_mode=None)
+                    await show_page(receipt, pages, token, 0)
+                self.completed = True
+                await remember_card(self.state, receipt, kind="receipt", token=token, pages=pages, index=0)
+                return
             try:
                 await edit_panel(self.message, text, markup)
                 receipt = self.message

@@ -79,6 +79,13 @@ def response_keyboard(response):
         if response.get(key):
             entry = response[key]
             keyboard.inline_keyboard.insert(0, [button(label, f"record:confirm:{entry['id']}"), button("Отмена", f"record:cancel:{entry['id']}")])
+            if key == "program_draft":
+                keyboard.inline_keyboard.insert(1, [button("Изменить", f"record_edit:program:{entry['id']}")])
+    for entry in response.get("record_drafts") or []:
+        label = {"workout": "Записать тренировку", "activity_log": "Записать активность",
+            "measurement": "Сохранить замеры", "wellbeing": "Сохранить самочувствие"}.get(entry["kind"], "Сохранить запись")
+        keyboard.inline_keyboard.insert(0, [button(label, f"record:confirm:{entry['id']}"), button("Отмена", f"record:cancel:{entry['id']}")])
+        keyboard.inline_keyboard.insert(1, [button("Изменить", f"record_edit:{entry['kind']}:{entry['id']}")])
     return keyboard
 
 
@@ -229,6 +236,8 @@ async def run_ai_action(query,state,professor_bot,professor_client,expert_client
         "message_id":status.message_id})
     message.as_(query.bot)
     retry = InlineKeyboardMarkup(inline_keyboard=[[button("Повторить", query.data.removeprefix("mentor:"))], [button("← Меню наставника", "menu")]])
+    from src.ai.telegram_mentor import button_action
+    task_token = button_action.set(query.data.removeprefix("mentor:"))
     try:
         result = await handle_single_ai_message(message,state,professor_bot,professor_client,expert_client)
     except Exception:
@@ -242,6 +251,7 @@ async def run_ai_action(query,state,professor_bot,professor_client,expert_client
             try: await status.delete()
             except Exception: log.warning("Mentor progress message could not be removed")
     finally:
+        button_action.reset(task_token)
         log.info("Mentor AI callback timing | action=%s | elapsed_ms=%d", query.data.split(":")[1], (time.monotonic()-started)*1000)
 
 

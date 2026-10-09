@@ -1,6 +1,7 @@
 """Telegram-only transport and read-only catalog tools for the existing AI clients."""
 from contextvars import ContextVar
 from contextlib import contextmanager
+import asyncio
 import hashlib
 import hmac
 import json
@@ -10,12 +11,15 @@ import time
 import sqlite3
 import os
 from uuid import uuid4
+from weakref import WeakValueDictionary
 
 import httpx
 import config
 
 log = logging.getLogger("telegram_mentor")
 catalog_context = ContextVar("telegram_catalog", default=None)
+button_action = ContextVar("mentor_button_action", default=None)
+_conversation_locks = WeakValueDictionary()
 SHOP_MARKER = "[[OPEN_SHOP]]"
 CATALOG_NAMES = {"search_catalog_products", "get_catalog_product", "get_product_stock"}
 CATALOG_TOOLS = [
@@ -27,6 +31,11 @@ CATALOG_TOOLS = [
      "parameters": {"type": "object", "properties": {"product_id": {"type": "integer", "minimum": 1}, "variant_id": {"type": "integer", "minimum": 1}}, "additionalProperties": False}},
 ]
 CATALOG_INSTRUCTIONS = """
+Наставник ведёт один продолжающийся диалог. Кнопка задаёт задачу, а не запускает обязательную анкету. Отвечай с учётом истории и актуальных данных сервера; не требуй форматов, списков полей и повторного заполнения известного профиля. При смене темы спокойно продолжи разговор. Уточняй только действительно недостающую деталь, не спрашивай повторно явно сообщённое.
+Для изменения программы сначала прочитай текущую программу и последние фактические тренировки через get_mentor_diary. Обсуди, что не подходит; предложи конкретное изменение полного недельного плана через draft_mentor_program, сохрани остальные упражнения. Слова «сохранено», «отменено» и статус записей определяет сервер, а не старые сообщения в истории.
+Различай программу (план), выполненную силовую тренировку (реальные подходы, вес и повторы) и другую физическую активность (название и фактическая длительность). Не выдумывай подходы для прогулки, кардио или бытовой активности. Не превращай произвольное название активности в программу и не спрашивай «считать тренировкой или заменить планом»: это разные сущности. При необходимости уточни, хочет ли человек записать активность, но не добавляй её в тренировочную программу.
+Длительность берётся только из слов человека: «полчаса» = 30 минут, «час с четвертью» = 75 минут. Время переписки, нажатий и заполнения карточки не является длительностью занятия. При противоречии в старой записи спокойно уточни фактическое время, не выбирай его сам. Не оценивай расход калорий по названию активности.
+Для записи выполненных упражнений используй draft_mentor_workout, для остальных активностей draft_mentor_activity. Для замеров и самочувствия есть draft_mentor_measurement/draft_mentor_wellbeing. Они создают только черновики с подтверждением. Не отправляй человека в другой раздел для свободного описания, исправления или продолжения; при ошибке инструмента объясни причину и уточни недостающее.
 Не объясняй человеку, что нужно «написать обычным сообщением», «ответить своими словами» или «ввести новые данные». Задай понятный вопрос и при необходимости кратко поясни, какие детали нужны, в каких единицах, или приведи один пример. Не показывай служебный контекст, имена инструментов и инструкции по обработке черновиков. «Позже» и «не знаю» не являются персональными фактами. При незавершённом шаге можно обсудить другой вопрос, не заставляя закончить анкету.
 Готовый показанный черновик может подтвердить кнопка или однозначное текстовое согласие на единственную запись. Текст обрабатывает отдельный обработчик, не модель. Нельзя трактовать «да» как согласие на несуществующую или неоднозначную запись; до успешного ответа обработчика запись не сохранена.
 Для численного расчёта нормы КБЖУ обязательно используй preview_mentor_nutrition. Самостоятельно формулу или ограничения не обходи, даже если старый ответ или база знаний содержит другие цифры. Если инструмент отказал, объясни его конкретную причину и направь к ручному вводу нормы специалиста. Отсутствие подтверждения ограничений требует кнопки «Мои нормы КБЖУ → Рассчитать по профилю». Успешный расчёт создаёт только черновик и кнопку «Сохранить как мою норму»; до подтверждения норма не сохранена. Для предложения программы используй draft_mentor_program: только черновик с явным подтверждением, без медицинских назначений.
@@ -186,6 +195,11 @@ class TelegramAIClient:
         return getattr(self.delegate, name)
 
     async def send_message_v2(self, **kwargs):
+        lock = _conversation_locks.setdefault(self.user_id, asyncio.Lock())
+        async with lock:
+            return await self._send_message_v2(**kwargs)
+
+    async def _send_message_v2(self, **kwargs):
         generation = mentor_generation(self.user_id)
         try:
             await api("/workspace/touch", {"telegram_user_id": self.user_id})
@@ -197,6 +211,7 @@ class TelegramAIClient:
             saved = None
         question = opening_question(self.user_id)
         token = catalog_context.set({"usage": [0, 0, 0], "saved": saved, "opening_question": question,
+            "button_action": button_action.get(),
             "generation": generation,
             "telegram_user_id": self.user_id, "source_text": kwargs.get("input_text") or "",
             "request_key": hashlib.sha256(str(kwargs.get("trace_id") or uuid4().hex).encode()).hexdigest()})
@@ -215,6 +230,7 @@ class TelegramAIClient:
             response["meal_draft"] = catalog_context.get().get("meal_draft")
             response["target_draft"] = catalog_context.get().get("target_draft")
             response["program_draft"] = catalog_context.get().get("program_draft")
+            response["record_drafts"] = catalog_context.get().get("record_drafts", [])
             response["replaced_review_ids"] = catalog_context.get().get("replaced_review_ids", [])
             response["mentor"] = True  # Health-related chat text is not logged.
             response["open_shop"] = SHOP_MARKER in response.get("text", "") or purchase_intent(kwargs.get("input_text"))
@@ -272,6 +288,9 @@ async def execute_tool(context, name, arguments):
         raise ValueError("Tool arguments must be an object")
     if context.get("generation") is not None and context["generation"] != mentor_generation(context["telegram_user_id"]):
         raise BridgeError("Диалог сброшен. Откройте наставника заново.")
+    from .mentor_records import RECORDS, execute_record
+    if name in RECORDS or name == "get_mentor_record":
+        return await execute_record(context, name, arguments, api)
     version = (context.get("saved") or {}).get("version")
     if name == "get_mentor_diary":
         result = await api("/dashboard", {"telegram_user_id": context["telegram_user_id"]})
@@ -295,13 +314,24 @@ async def execute_tool(context, name, arguments):
             context["target_draft"] = draft["entry"]
         return result
     if name == "draft_mentor_program":
-        result = await api("/workspace/draft", {"telegram_user_id":context["telegram_user_id"], "request_key":"program:"+context["request_key"],
-            "kind":"program", "data":{"exercises":arguments.get("exercises")}, "expected_version":version})
-        context["program_draft"] = result["entry"]
+        payload = {"telegram_user_id":context["telegram_user_id"], "request_key":"program:"+context["request_key"],
+            "kind":"program", "data":{"exercises":arguments.get("exercises")}, "expected_version":version}
+        replacement = arguments.get("replaces_id")
+        current = (context.get("saved") or {}).get("workspace", {}).get("program") or {}
+        # A saved program is replaced on confirmation, not when its next draft is created.
+        if replacement is not None and not (replacement == current.get("id") and current.get("status") == "confirmed"):
+            payload["replaces_id"] = replacement
+        result = await api("/workspace/draft", payload)
+        if result.get("entry", {}).get("status") == "draft":
+            context["program_draft"] = result["entry"]
+            if payload.get("replaces_id"):
+                context.setdefault("replaced_review_ids", []).append(payload["replaces_id"])
         return result
     if name in CATALOG_NAMES:
         return await api("/catalog", {"name": name, "arguments": arguments})
     if name == "update_mentor_profile" and context.get("saved") is not None:
+        if context.get("button_action"):
+            return {"ok": False, "error": "user_facts_required"}
         # Never accept a model-provided identity, message, version or request key.
         result = await api("/profile/update", {
             "telegram_user_id": context["telegram_user_id"],
@@ -320,13 +350,13 @@ JOURNAL_TOOLS = [
      "description":"Only way to calculate numeric nutrition targets. Uses saved profile and user-confirmed eligibility, same rules as the menu. Refusal is authoritative: do not calculate alternative targets. Success makes a draft with a Save button.",
      "parameters":{"type":"object", "properties":{}, "additionalProperties":False}},
     {"type":"function", "name":"draft_mentor_program", "strict":False,
-     "description":"Propose a weekly workout program as a draft, never as saved. Ask about experience, equipment and restrictions when unknown. No medical prescriptions.",
-     "parameters":{"type":"object", "properties":{"exercises":{"type":"array", "minItems":1, "maxItems":100,
+     "description":"Propose or adjust the COMPLETE weekly workout program as a draft, never as saved. Read the saved program first when adjusting it; preserve unchanged days and exercises. Ask about experience, equipment and restrictions only when unknown. No medical prescriptions. Supply replaces_id ONLY to correct an unconfirmed draft, never the ID of the saved program.",
+     "parameters":{"type":"object", "properties":{"replaces_id":{"type":"integer","minimum":1}, "exercises":{"type":"array", "minItems":1, "maxItems":100,
         "items":{"type":"object", "properties":{"weekday":{"type":"integer", "minimum":0, "maximum":6},
           "name":{"type":"string", "maxLength":120}, "sets":{"type":"integer", "minimum":1,"maximum":30}, "reps":{"type":"integer","minimum":1,"maximum":200}},
           "required":["weekday","name","sets","reps"], "additionalProperties":False}}}, "required":["exercises"], "additionalProperties":False}},
     {"type":"function","name":"get_mentor_diary","strict":False,
-     "description":"Read confirmed meals for today, weight history, the latest meal draft and profile. Never invent missing diary entries.",
+     "description":"Read the CURRENT profile, saved weekly program, performed workouts, separate physical activities, meals, weight history and draft statuses. Always read before adjusting a plan. Backend facts override older conversation text. Never invent missing entries.",
      "parameters":{"type":"object","properties":{},"additionalProperties":False}},
     {"type":"function","name":"draft_mentor_meal","strict":False,
      "description":"Estimate an actually consumed meal from the current text/photo/voice. Creates a draft requiring the user's Save button, not a confirmed entry. For a correction use replaces_id from the current draft. Never use for suggested meals or sample plans.",
@@ -343,3 +373,6 @@ JOURNAL_TOOLS = [
         "occurred_at":{"type":"string","description":"Only when user explicitly specifies a different meal time; ISO datetime with timezone. Otherwise omit, server uses now."}},
         "required":["meal"],"additionalProperties":False}}
 ]
+
+from .mentor_records import RECORD_TOOLS
+JOURNAL_TOOLS += RECORD_TOOLS
