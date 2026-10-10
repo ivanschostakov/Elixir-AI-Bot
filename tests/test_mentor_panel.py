@@ -10,6 +10,13 @@ from src.bot.handlers.mentor import button
 from src.bot.handlers.mentor_flows import keyboard
 
 
+@pytest.fixture(autouse=True)
+def verified_profile(monkeypatch):
+    from src.bot.handlers import mentor_access, mentor_onboarding
+    monkeypatch.setattr(mentor_access, "check_mentor_phone", AsyncMock(return_value=False))
+    monkeypatch.setattr(mentor_onboarding, "needs_profile", lambda _: False)
+
+
 class State:
     def __init__(self): self.values = {"mentor_panel": {"message_id": 4, "chat_id": 123}}
     async def update_data(self, **kwargs): self.values.update(kwargs)
@@ -79,6 +86,23 @@ def test_photo_caption_navigation_stays_under_telegram_limit():
         await panel.flush()
         assert len(msg.edit_caption.await_args.kwargs["caption"]) < 1024
         msg.edit_text.assert_not_awaited()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("photo,limit", [(False, 4096), (True, 1024)])
+def test_navigation_pages_count_utf16_units(photo, limit):
+    async def run():
+        msg, state = message(), State()
+        if photo:
+            msg.photo = [object()]
+        original = "\U0001f600" * 3000
+        panel = MentorPanel(msg, state)
+        await panel.answer(original)
+        await panel.flush()
+        pages = state.values["mentor_panel"]["pages"]
+        assert "".join(p["text"] for p in pages) == original
+        assert all(len((p["text"] + "\n\n999 / 999").encode("utf-16-le")) // 2 <= limit for p in pages)
+        msg.answer.assert_not_awaited()
     asyncio.run(run())
 
 

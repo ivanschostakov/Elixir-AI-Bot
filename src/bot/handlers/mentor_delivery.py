@@ -2,7 +2,7 @@
 from .mentor_format import html_text
 
 
-async def send_mentor_reply(message, text, reply_markup=None):
+async def send_mentor_reply(message, text, reply_markup=None, *, state=None):
     remaining = str(text)
     sent = None
     while remaining:
@@ -12,4 +12,7 @@ async def send_mentor_reply(message, text, reply_markup=None):
         chunk, remaining = remaining[:size], remaining[size:]
         sent = await message.answer(html_text(chunk), parse_mode="HTML", protect_content=True,
             reply_markup=reply_markup if not remaining else None)
+        if state is not None:
+            from .mentor_panel import remember_message
+            await remember_message(state, sent, kind="answer")
     return sent

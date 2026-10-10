@@ -17,9 +17,13 @@ DEFAULT_LAST_USED = LAST_USED_EXPERT
 # Backward-compatible alias used across legacy handlers.
 LAST_USED_NEW = LAST_USED_PROFESSOR
 
-async def _request_phone(message: Message, state: FSMContext, full_name: str | None = None):
+async def _request_phone(message: Message, state: FSMContext, full_name: str | None = None, *, mentor_input=None):
+    from .mentor_access import remember_mentor_phone_input, unwrap_message
+    message = unwrap_message(message)
+    if mentor_input:
+        await remember_mentor_phone_input(mentor_input, state)
     await state.set_state(user_states.Registration.phone)
-    display_name = full_name or message.from_user.full_name
+    display_name = full_name if full_name is not None else message.from_user.full_name
     return await message.answer(user_texts.verify_phone.replace('*', display_name), reply_markup=user_keyboards.phone)
 
 async def _ensure_user(message: Message, professor_client):

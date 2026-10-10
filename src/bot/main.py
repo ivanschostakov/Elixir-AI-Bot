@@ -197,7 +197,7 @@ class ProfessorBot(Bot):
             self.__logger.info("Updated tokens for %s: +%d/%d (total %d/%d)", user_id, input_tokens, output_tokens, new_input, new_output)
         except Exception as exc: self.__logger.warning("Failed to sync token totals for user_id=%s: %s", user_id, exc)
 
-    async def parse_response(self, response: dict, message: Message, back_menu: bool = False, adv: bool = False):
+    async def parse_response(self, response: dict, message: Message, back_menu: bool = False, adv: bool = False, *, mentor_state=None):
         user_id = message.from_user.id
         self.__logger = self.__logger
         self.__logger.info("INCOMING message | user_id=%s | text=%r",user_id, "[mentor]" if response.get("mentor") else getattr(message, "text", None))
@@ -236,7 +236,7 @@ class ProfessorBot(Bot):
         if out_text:
             text_markup = reply_markup
             if response.get("mentor"):
-                sent_message = await send_mentor_reply(message, out_text, text_markup)
+                sent_message = await send_mentor_reply(message, out_text, text_markup, state=mentor_state)
             elif len(out_text) > MAX_TG_MSG_LEN:
                 self.__logger.info("OUTGOING long text | len=%d | splitting", len(out_text))
                 chunks = await split_text(out_text)

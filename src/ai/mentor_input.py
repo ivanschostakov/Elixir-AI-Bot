@@ -133,6 +133,18 @@ class PhotoControl(Data):
     pass
 
 
+class OnboardingProfile(Data):
+    goal: Literal["weight_loss", "maintain", "weight_gain", "custom"] | None = None
+    goal_detail: str | None = Field(default=None, max_length=1000)
+    age: int | None = Field(default=None, ge=1, le=120)
+    sex: Literal["male", "female"] | None = None
+    height_cm: float | None = Field(default=None, ge=50, le=260)
+    current_weight_kg: float | None = Field(default=None, gt=0, le=500)
+    activity: Literal["low", "light", "moderate", "high"] | None = None
+    preferences: str | None = Field(default=None, max_length=2000)
+    restrictions: str | None = Field(default=None, max_length=2000)
+
+
 MODELS = {"weight": Weight, "program_sets": Sets, "program_reps": Reps,
     "set_weight": SetWeight, "set_reps": SetReps, "workout_duration": Duration,
     "wellbeing_energy": Energy, "target": Target, "measurement": Measurement,
@@ -141,7 +153,7 @@ MODELS = {"weight": Weight, "program_sets": Sets, "program_reps": Reps,
     "workout_set": WorkoutSet, "program_name": GuidedExercise,
     "set_name": GuidedSet, "course": Course, "course_dose": Course,
     "wellbeing_note": Note, "wellbeing_record": Wellbeing, "custom_goal": Goal, "course_record": Course,
-    "meal_search": Search, "progress_photo": PhotoControl}
+    "meal_search": Search, "progress_photo": PhotoControl, "onboarding_profile": OnboardingProfile}
 MODELS.update(program_sets=GuidedSets, program_reps=GuidedExercise,
     set_weight=GuidedSet, set_reps=GuidedReps, course_schedule=Course, course_supply=Course,
     wellbeing_score=Wellbeing, wellbeing_energy=Wellbeing)
@@ -408,7 +420,12 @@ async def parse_step(message, state, kind, client):
         "reminder_kind": values.get("reminder_kind"), "planned_exercise": values.get("planned_exercise"),
         "known": values.get("form_known", {}), "profile": saved.get("profile", {}), "editing": values.get("editing", False)}
     try:
-        result = await extract_answer(client, kind, answers, context)
+        # An unambiguous reply to a weight question needs no model round trip.
+        match = re.fullmatch(r"(\d{1,3}(?:[.,]\d{1,2})?)\s*(?:кг|kg)?", text, re.I) if kind == "weight" else None
+        if match and 0 < float(match[1].replace(",", ".")) <= 500:
+            result = ENVELOPES[kind](data=Weight(weight=float(match[1].replace(",", "."))))
+        else:
+            result = await extract_answer(client, kind, answers, context)
     except BridgeError:
         fresh = await state.get_data()
         if fresh.get("form_token") != token or mentor_generation(message.from_user.id) != generation or not mentor_enabled(message.from_user.id):

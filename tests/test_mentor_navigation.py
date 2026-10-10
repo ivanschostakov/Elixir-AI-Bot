@@ -15,9 +15,12 @@ from test_telegram_flows import State, dashboard
 
 @pytest.fixture(autouse=True)
 def private_store(tmp_path, monkeypatch):
+    from src.bot.handlers import mentor_access, mentor_onboarding
     monkeypatch.setattr(t.config, "DATA_DIR", tmp_path)
     t.set_mentor_enabled(123, True)
     monkeypatch.setattr(mentor, "configured", lambda: True)
+    monkeypatch.setattr(mentor_access, "check_mentor_phone", AsyncMock(return_value=False))
+    monkeypatch.setattr(mentor_onboarding, "needs_profile", lambda _: False)
 
 
 def bot():
@@ -122,7 +125,7 @@ def test_weight_confirmation_keeps_values_and_consumes_review_buttons(monkeypatc
     text = review.edit_text.await_args.args[0]
     assert text.startswith(review.text) and "75,5 кг записан" in text
     markup = review.edit_text.await_args.kwargs["reply_markup"]
-    assert "mentor:receipt" in actions(markup)
+    assert "mentor:receipt" not in actions(markup)
     assert not any(a.startswith(("mentor:input_save:", "mentor:input_edit:")) for a in actions(markup))
     assert "pending_input" not in state.values
 
@@ -146,7 +149,7 @@ def test_ai_meal_review_becomes_an_authoritative_receipt(monkeypatch, outcome, s
     else:
         assert text == "Оценка не записана в дневник."
     markup = msg.edit_text.await_args.kwargs["reply_markup"]
-    assert "mentor:receipt" in actions(markup)
+    assert "mentor:receipt" not in actions(markup)
     assert not any(a.startswith(("mentor:meal_confirm:", "mentor:meal_cancel:")) for a in actions(markup))
     assert state.values["pending_reviews"] == []
 
@@ -226,15 +229,19 @@ def test_structured_draft_confirmation_preserves_full_preview(monkeypatch):
     assert "Программа тренировок сохранена" in msg.edit_text.await_args.args[0]
 
 
-def test_long_preview_is_not_trimmed_to_append_a_status(monkeypatch):
+def test_long_preview_is_paginated_to_keep_preview_and_plain_text_status(monkeypatch):
     entry = {"id":42, "status":"confirmed", "kind":"program"}
     apis(monkeypatch, {"/workspace/action":{"entry":entry}})
     msg = message(text="я"*3990)
     state = State(mentor_panel={"message_id":10, "chat_id":123, "kind":"form"})
     asyncio.run(mentor.mentor_action(query("record:confirm:42", msg), state))
-    msg.edit_text.assert_not_awaited()
+    msg.edit_text.assert_awaited_once()
     msg.answer.assert_not_awaited()
-    msg.edit_reply_markup.assert_awaited_once()
+    msg.edit_reply_markup.assert_not_awaited()
+    pages = state.values["mentor_panel"]["pages"]
+    assert "".join(p["text"] for p in pages).startswith(msg.text)
+    assert "Программа тренировок сохранена" in msg.edit_text.await_args.args[0]
+    assert "mentor:receipt" not in actions(msg.edit_text.await_args.kwargs["reply_markup"])
 
 
 def test_confirmation_retains_all_preview_pages():
@@ -245,8 +252,9 @@ def test_confirmation_retains_all_preview_pages():
         state = State(mentor_panel=saved)
         panel = MentorPanel(msg, state, saved_card=saved)
         await panel.complete("Программа сохранена.", mentor.back_keyboard())
-        assert [p["text"] for p in state.values["mentor_panel"]["pages"]] == ["Первая часть", "Вторая часть"]
+        assert [p["text"] for p in state.values["mentor_panel"]["pages"]] == ["Первая часть", "Вторая часть\n\nПрограмма сохранена."]
         assert "Вторая часть" in msg.edit_text.await_args.args[0]
+        assert "Программа сохранена." in msg.edit_text.await_args.args[0]
         assert state.values["mentor_panel"]["index"] == 1
         assert not any("record:confirm" in str(p["rows"]) for p in state.values["mentor_panel"]["pages"])
         msg.answer.assert_not_awaited()
@@ -323,10 +331,10 @@ def test_clicking_an_older_menu_never_edits_the_newer_menu(monkeypatch):
         mentor_cards=[{"message_id":4, "chat_id":123, "kind":"navigation"},
             {"message_id":20, "chat_id":123, "kind":"navigation"}])
     asyncio.run(mentor.mentor_action(query("food", msg), state))
-    msg.edit_text.assert_awaited_once()
+    msg.edit_text.assert_not_awaited()
     msg.answer.assert_not_awaited()
     msg.bot.edit_message_text.assert_not_awaited()
-    assert state.values["mentor_panel"]["message_id"] == 4
+    assert state.values["mentor_panel"]["message_id"] == 20
 
 
 def test_form_answer_retires_old_question_buttons_but_does_not_edit_its_text():
@@ -343,9 +351,10 @@ def test_form_answer_retires_old_question_buttons_but_does_not_edit_its_text():
 
 def test_form_reset_preserves_ui_but_discards_pending_write():
     state = State(pending_input={"token":"secret"}, mentor_panel={"message_id":4},
-        mentor_cards=[{"message_id":4}], mentor_media={"message_id":5})
+        mentor_cards=[{"message_id":4}], mentor_media={"message_id":5},
+        mentor_latest_message={"message_id":6,"chat_id":123,"kind":"user"})
     asyncio.run(clear_input(state))
-    assert set(state.values) == {"mentor_panel", "mentor_cards", "mentor_media"}
+    assert set(state.values) == {"mentor_panel", "mentor_cards", "mentor_media", "mentor_latest_message"}
 
 
 def test_graph_and_photos_share_one_reusable_protected_viewer():

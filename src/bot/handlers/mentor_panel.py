@@ -1,11 +1,72 @@
 """Edit clicked menu cards; open fresh navigation below conversational replies."""
+import asyncio
 import secrets
+from weakref import WeakValueDictionary
 
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 
 
-UI_KEYS = ("mentor_panel", "mentor_cards", "mentor_media")
+UI_KEYS = ("mentor_panel", "mentor_cards", "mentor_media", "mentor_latest_message")
+_panel_locks = WeakValueDictionary()
+
+
+def panel_lock(state):
+    key = (id(state.storage), state.key) if hasattr(state, "key") else id(state)
+    lock = _panel_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _panel_locks[key] = lock
+    return lock
+
+
+def same_card(card, message):
+    return (card.get("message_id") == message.message_id
+        and card.get("chat_id") == message.chat.id)
+
+
+def latest_message(saved, chat_id):
+    candidates = [saved.get("mentor_latest_message", {}), saved.get("mentor_panel", {}),
+        saved.get("mentor_media", {}), *saved.get("mentor_cards", [])]
+    return max((card for card in candidates if card.get("chat_id") == chat_id
+        and isinstance(card.get("message_id"), int)), key=lambda card: card["message_id"], default={})
+
+
+async def remember_message(state, message, *, kind="user"):
+    """Hook for incoming messages and each successful outgoing delivery, not callbacks.
+
+    Call with kind="answer" for AI replies. This only advances the watermark;
+    it never makes conversation text an editable service card.
+    """
+    mid = getattr(message, "message_id", None)
+    chat_id = getattr(getattr(message, "chat", None), "id", None)
+    if not isinstance(mid, int) or not isinstance(chat_id, int):
+        return
+    saved = await state.get_data()
+    latest = latest_message(saved, chat_id)
+    if mid >= latest.get("message_id", 0):
+        await state.update_data(mentor_latest_message={"message_id": mid, "chat_id": chat_id, "kind": kind})
+
+
+def navigation_mode(message, saved, *, action=None):
+    """Only the clicked, latest service card can be edited; never retarget a click."""
+    cards = [saved.get("mentor_panel", {}), *saved.get("mentor_cards", [])]
+    own = next((card for card in cards if same_card(card, message)), None)
+    latest = latest_message(saved, message.chat.id)
+    if latest.get("message_id", 0) > message.message_id:
+        active = saved.get("mentor_panel", {})
+        if (active.get("chat_id") == message.chat.id
+            and active.get("message_id") == latest["message_id"]
+            and active.get("kind", "navigation") in {"navigation", "form"}):
+            return "ignore"
+        return "send"
+    if own is not None:
+        return "edit" if own.get("kind", "navigation") in {"navigation", "form"} else "send"
+    if same_card(latest, message) and latest.get("kind") in {"user", "answer", "receipt"}:
+        return "send"
+    if (action == "open" and is_main_menu(message)) or is_mentor_menu(message):
+        return "edit"
+    return "send"
 
 
 async def clear_input(state):
@@ -19,12 +80,31 @@ async def remember_card(state, message, *, kind="form", **extra):
     chat_id = getattr(getattr(message, "chat", None), "id", None)
     if not isinstance(mid, int) or not isinstance(chat_id, int):
         return
+    await remember_message(state, message, kind=kind)
     card = {"message_id": mid, "chat_id": chat_id,
         "photo": bool(getattr(message, "photo", None)), "kind": kind, **extra}
     saved = await state.get_data()
     cards = [c for c in saved.get("mentor_cards", []) if (c["chat_id"], c["message_id"]) != (chat_id, mid)]
-    marker = {key: value for key, value in card.items() if key not in {"pages", "token"}}
-    await state.update_data(mentor_panel=card, mentor_cards=[*cards, marker][-20:])
+    current = saved.get("mentor_panel", {})
+    values = {"mentor_cards": sorted([*cards, card], key=lambda c: c["message_id"])[-20:]}
+    # Completing an older draft must not promote it over the active navigation.
+    if current.get("chat_id") != chat_id or mid >= current.get("message_id", 0):
+        values["mentor_panel"] = card
+    await state.update_data(**values)
+
+
+def text_pages(text, markup, limit):
+    rows = markup.model_dump(mode="json")["inline_keyboard"] if markup else []
+    pages, chunk, units = [], [], 0
+    for char in text:
+        size = 2 if ord(char) > 0xffff else 1
+        if units + size > limit:
+            pages.append({"text": "".join(chunk), "rows": list(rows)})
+            chunk, units = [], 0
+        chunk.append(char)
+        units += size
+    pages.append({"text": "".join(chunk), "rows": list(rows)})
+    return pages
 
 
 def is_main_menu(message):
@@ -74,99 +154,79 @@ class MentorPanel:
         return await self.message.edit_reply_markup(**kwargs)
 
     async def complete(self, text, reply_markup=None, *, replace=False):
-        rows = [[InlineKeyboardButton(text=text.splitlines()[0][:60], callback_data="mentor:receipt")]]
-        if reply_markup:
-            rows += reply_markup.inline_keyboard
-        markup = InlineKeyboardMarkup(inline_keyboard=rows)
-        if replace:
-            limit = 900 if getattr(self.message, "photo", None) else 3500
-            if len(text.encode("utf-16-le")) // 2 > limit:
-                pages, chunk, units = [], [], 0
-                serialized = markup.model_dump(mode="json")["inline_keyboard"]
-                for char in text:
-                    size = 2 if ord(char) > 0xffff else 1
-                    if units+size > limit:
-                        pages.append({"text": "".join(chunk), "rows": serialized})
-                        chunk, units = [], 0
-                    chunk.append(char)
-                    units += size
-                pages.append({"text": "".join(chunk), "rows": serialized})
-                token = secrets.token_hex(4)
-                receipt = self.message
-                try:
-                    await show_page(receipt, pages, token, 0)
-                except TelegramBadRequest as error:
-                    if not missing_card(error):
-                        raise
-                    receipt = await self.message.answer(pages[0]["text"], parse_mode=None)
-                    await show_page(receipt, pages, token, 0)
-                self.completed = True
-                await remember_card(self.state, receipt, kind="receipt", token=token, pages=pages, index=0)
-                return
-            try:
-                await edit_panel(self.message, text, markup)
-                receipt = self.message
-            except TelegramBadRequest as error:
-                if not missing_card(error):
-                    raise
-                receipt = await self.message.answer(text, reply_markup=markup, parse_mode=None)
-            self.completed = True
-            await remember_card(self.state, receipt, kind="receipt")
+        if self.completed:
             return
-        # Other reviews retain their full explanation and consume only the action buttons.
-        saved = self.saved_card or {}
-        if saved.get("message_id") == self.message.message_id and len(saved.get("pages", [])) > 1:
+        markup = reply_markup or InlineKeyboardMarkup(inline_keyboard=[])
+        limit = 900 if getattr(self.message, "photo", None) else 3500
+        saved = await self.state.get_data()
+        cards = [saved.get("mentor_panel", {}), *saved.get("mentor_cards", []), self.saved_card or {}, *self.cards]
+        own = next((card for card in cards if same_card(card, self.message)), {})
+        if own.get("kind") == "receipt" and own.get("completion_text") == text:
+            self.completed = True
+            return
+        if not replace and own.get("pages"):
             pages = [{"text": p["text"], "rows": markup.model_dump(mode="json")["inline_keyboard"]}
-                for p in saved["pages"]]
-            token = secrets.token_hex(4)
-            index = saved.get("index", 0)
-            await show_page(self.message, pages, token, index)
-            await remember_card(self.state, self.message, kind="receipt", token=token, pages=pages, index=index)
-            self.completed = True
-            return
-        known = any(c.get("message_id") == self.message.message_id and c.get("chat_id") == self.message.chat.id
-            for c in [saved, *self.cards])
-        original = (getattr(self.message, "caption", None) if getattr(self.message, "photo", None)
-            else getattr(self.message, "text", None)) or ""
-        full = original+"\n\n"+text
-        limit = 1000 if getattr(self.message, "photo", None) else 4000
-        if known and len(full.encode("utf-16-le")) // 2 <= limit:
-            await edit_panel(self.message, full, markup)
+                for p in own["pages"]]
+            tail = pages.pop()["text"] + "\n\n" + text
+            pages.extend(text_pages(tail, markup, limit))
         else:
-            await self.message.edit_reply_markup(reply_markup=markup)
+            original = (getattr(self.message, "caption", None) if getattr(self.message, "photo", None)
+                else getattr(self.message, "text", None)) or ""
+            full = text if replace or not original else original + "\n\n" + text
+            pages = text_pages(full, markup, limit)
+        token = secrets.token_hex(4)
+        index = 0 if replace else len(pages) - 1
+        receipt = self.message
+        try:
+            if len(pages) == 1:
+                await edit_panel(receipt, pages[0]["text"], markup)
+            else:
+                await show_page(receipt, pages, token, index)
+        except TelegramBadRequest as error:
+            if not missing_card(error):
+                raise
+            receipt = await show_page(self.message, pages, token, index, send=True)
         self.completed = True
-        await remember_card(self.state, self.message, kind="receipt")
+        await remember_card(self.state, receipt, kind="receipt", token=token, pages=pages,
+            index=index, completion_text=text)
 
     async def answer_photo(self, photo, **kwargs):
         return await show_media(self.message, self.state, photo, **kwargs)
 
     async def flush(self):
+        async with panel_lock(self.state):
+            await self._flush()
+
+    async def _flush(self):
         if self.completed or not self.blocks:
             return
+        saved = dict(await self.state.get_data())
+        saved.setdefault("mentor_panel", self.saved_card or {})
+        saved["mentor_cards"] = [*saved.get("mentor_cards", []), *self.cards]
+        mode = navigation_mode(self.message, saved, action=self.action)
+        if mode == "ignore":
+            self.blocks.clear()
+            return
+        self.target = self.message
         pages = []
-        limit = 900 if getattr(self.target, "photo", None) else 3500
+        limit = 900 if mode == "edit" and getattr(self.target, "photo", None) else 3500
         for text, markup in self.blocks:
-            rows = markup.model_dump(mode="json")["inline_keyboard"] if markup else []
-            for start in range(0, max(1, len(text)), limit):
-                chunk = text[start:start+limit]
-                if pages and len(pages[-1]["text"]) + len(chunk) + 2 <= limit and len(pages[-1]["rows"])+len(rows) <= 40:
+            for page in text_pages(text, markup, limit):
+                chunk, rows = page["text"], page["rows"]
+                if pages and len((pages[-1]["text"] + "\n\n" + chunk).encode("utf-16-le")) // 2 <= limit and len(pages[-1]["rows"])+len(rows) <= 40:
                     pages[-1]["text"] += "\n\n" + chunk
                     pages[-1]["rows"] += rows
                 else:
                     pages.append({"text": chunk, "rows": list(rows)})
-        saved = self.saved_card if self.saved_card is not None else (await self.state.get_data()).get("mentor_panel", {})
-        cards = [saved, *self.cards]
-        own = next((c for c in cards if c.get("message_id") == self.target.message_id
-            and c.get("chat_id") == self.message.chat.id and c.get("kind", "navigation") in {"navigation", "form"}), None)
-        send = not own and not (self.action == "open" and is_main_menu(self.message)) and not is_mentor_menu(self.message)
         token = secrets.token_hex(4)
         try:
-            self.target = await show_page(self.target, pages, token, 0, root=self.root, send=send)
+            self.target = await show_page(self.target, pages, token, 0, root=self.root, send=mode == "send")
         except TelegramBadRequest as error:
             if not missing_card(error):
                 raise
             self.target = await show_page(self.message, pages, token, 0, root=self.root, send=True)
         await remember_card(self.state, self.target, kind=self.kind, token=token, pages=pages, root=self.root)
+        self.blocks.clear()
 
 
 class ReplyCards:
@@ -178,6 +238,7 @@ class ReplyCards:
         return getattr(self.message, key)
 
     async def answer(self, text, **kwargs):
+        await remember_message(self.state, self.message)
         previous = (await self.state.get_data()).get("mentor_panel", {})
         sent = await self.message.answer(text, **kwargs)
         await remember_card(self.state, sent, kind=self.kind)
@@ -201,7 +262,7 @@ async def reply_panel(message, state):
 
 async def complete_card(message, text, reply_markup=None, **kwargs):
     if isinstance(message, MentorPanel):
-        return await message.complete(text, reply_markup)
+        return await message.complete(text, reply_markup, replace=kwargs.pop("replace", False))
     return await message.answer(text, reply_markup=reply_markup, **kwargs)
 
 
@@ -211,10 +272,12 @@ def missing_card(error):
 
 
 async def show_media(message, state, photo, **kwargs):
-    saved = (await state.get_data()).get("mentor_media", {})
+    data = await state.get_data()
+    saved = data.get("mentor_media", {})
     caption = kwargs.get("caption")
     markup = kwargs.get("reply_markup")
-    if saved.get("chat_id") == message.chat.id:
+    if (saved.get("chat_id") == message.chat.id
+        and saved.get("message_id") == latest_message(data, message.chat.id).get("message_id")):
         try:
             await message.bot.edit_message_media(chat_id=saved["chat_id"], message_id=saved["message_id"],
                 media=InputMediaPhoto(media=photo, caption=caption, parse_mode=kwargs.get("parse_mode")), reply_markup=markup)
@@ -226,6 +289,7 @@ async def show_media(message, state, photo, **kwargs):
                 raise
     sent = await message.answer_photo(photo, **kwargs)
     if isinstance(getattr(sent, "message_id", None), int):
+        await remember_message(state, sent, kind="media")
         await state.update_data(mentor_media={"message_id": sent.message_id, "chat_id": message.chat.id})
     return sent
 
@@ -264,9 +328,15 @@ async def show_page(message, pages, token, index, *, root=False, send=False):
 
 
 async def navigate_page(query, state):
-    saved = (await state.get_data()).get("mentor_panel", {})
+    data = await state.get_data()
     parts = query.data.split(":")
-    if len(parts) != 4 or parts[2] != saved.get("token") or saved.get("message_id") != query.message.message_id:
+    cards = [data.get("mentor_panel", {}), *data.get("mentor_cards", [])]
+    saved = next((card for card in cards if same_card(card, query.message)
+        and len(parts) == 4 and parts[2] == card.get("token")), {})
+    # Receipt paging inspects the clicked history item; it never opens navigation.
+    stale = (latest_message(data, query.message.chat.id).get("message_id", 0) > query.message.message_id
+        and saved.get("kind") != "receipt")
+    if not saved or stale:
         await query.answer("Откройте меню заново: эта страница устарела.")
         return
     index = int(parts[3]) if parts[3].isdigit() else -1
@@ -275,4 +345,5 @@ async def navigate_page(query, state):
         return
     await query.answer()
     await show_page(query.message, saved["pages"], saved["token"], index, root=saved.get("root", False))
-    await state.update_data(mentor_panel={**saved, "index": index})
+    await remember_card(state, query.message, **{key: value for key, value in {**saved, "index": index}.items()
+        if key not in {"message_id", "chat_id", "photo"}})

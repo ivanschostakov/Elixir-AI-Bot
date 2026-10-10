@@ -15,7 +15,7 @@ import config
 from src.ai.telegram_mentor import api, BridgeError, mentor_enabled
 from src.ai.mentor_input import MODELS, input_lock, parse_step, family, canonical, followup
 from src.ai.mentor_copy import QUESTIONS, edit_question
-from .mentor_format import day, period, timezone_label, DAYS, GOALS, ACTIVITY
+from .mentor_format import day, period, timezone_label, number_text, DAYS, GOALS, ACTIVITY
 from .mentor_panel import MentorPanel, ReplyCards, clear_input, complete_card
 
 router = Router(name="mentor_forms")
@@ -32,7 +32,7 @@ def keyboard(*rows):
 
 
 def fmt(value):
-    return f"{float(value):,.2f}".rstrip("0").rstrip(".").replace(",", " ").replace(".", ",") if value is not None else "нет данных"
+    return number_text(value)
 
 
 def number(value):
@@ -44,11 +44,31 @@ def request_key(message):
 
 
 def specialist_button():
-    value = (config.env("TELEGRAM_MENTOR_SPECIALIST_URL", "") or config.env("TELEGRAM_MENTOR_SUPPORT_URL", "") or "https://t.me/ShostakovIV").strip()
-    parsed = urlsplit(value)
-    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+    value = (config.env("TELEGRAM_MENTOR_SPECIALIST_URL", "") or config.env("TELEGRAM_MENTOR_SUPPORT_URL", "")).strip()
+    try:
+        parsed = urlsplit(value)
+        valid = (parsed.scheme == "https" and parsed.hostname in {"t.me", "telegram.me"}
+            and parsed.port in {None, 443} and not parsed.username and not parsed.password
+            and re.fullmatch(r"/(?:(?!c/)[A-Za-z0-9_]+|c/[1-9]\d*)/[1-9]\d*(?:/[1-9]\d*)?/?", parsed.path)
+            and parsed.path.split("/")[1].casefold() != "shostakoviv")
+    except ValueError:
         return None
-    return InlineKeyboardButton(text="Связаться со специалистом" if config.env("TELEGRAM_MENTOR_SPECIALIST_URL", "") else "Открыть поддержку", url=value)
+    return InlineKeyboardButton(text="Ветка врачей", url=value) if valid else None
+
+
+def record_keyboard(entry):
+    kind = entry.get("kind", "meal")
+    if entry.get("status") == "cancelled":
+        destination = {"meal": ("К питанию", "food"), "target": ("К питанию", "food"),
+            "program": ("К тренировкам", "workouts"), "workout": ("К тренировкам", "workouts"),
+            "activity_log": ("К тренировкам", "workouts"), "measurement": ("К фото и замерам", "measurements"),
+            "wellbeing": ("К плану на сегодня", "today"), "course": ("К моему курсу", "course")}.get(kind)
+    else:
+        destination = {"meal": ("Итоги питания", "nutrition"), "target": ("Итоги питания", "nutrition"),
+            "program": ("План тренировок", "workout_plan"), "workout": ("Результаты тренировок", "workout_results"),
+            "activity_log": ("Результаты тренировок", "workout_results"), "measurement": ("Фото и замеры", "measurements"),
+            "wellbeing": ("План на сегодня", "today"), "course": ("Мой курс", "course")}.get(kind)
+    return keyboard([destination]) if destination else keyboard()
 
 
 def reminder_payload(settings):
@@ -205,9 +225,9 @@ async def pending_text_locked(message, state, client=None, *, professor_bot=None
     if entry.get("kind") in {"workout", "activity_log", "measurement", "wellbeing"}:
         saved = result["entry"]
         await message.answer("Запись сохранена.\n\n"+draft_text(saved) if saved["status"] == "confirmed" else "Черновик отменён.",
-            parse_mode=None, reply_markup=keyboard([("Открыть результаты", "workouts" if entry["kind"] in {"workout", "activity_log"} else "progress")]))
+            parse_mode=None, reply_markup=record_keyboard(saved))
         return True
-    await message.answer("Записано: "+entry.get("name", {"measurement":"замеры", "wellbeing":"самочувствие", "target":"норма питания", "program":"программа"}.get(entry.get("kind"), "запись"))+"." if yes else "Не сохраняю.", reply_markup=keyboard())
+    await message.answer("Записано: "+entry.get("name", {"measurement":"замеры", "wellbeing":"самочувствие", "target":"норма питания", "program":"программа"}.get(entry.get("kind"), "запись"))+"." if result["entry"]["status"] == "confirmed" else "Не сохраняю.", reply_markup=record_keyboard(result["entry"]))
     return True
 
 
@@ -384,14 +404,17 @@ def daily_tasks(data):
 def home_view(data):
     w = data.get("workspace", {})
     p = data.get("profile", {})
-    tasks = daily_tasks(data)
     target = w.get("target") or {}
-    lines = ["🌿 Наставник ElixirPeptide", f"Сегодня выполнено {sum(done for _, done in tasks)} из {len(tasks)} задач."]
+    lines = ["🌿 Наставник ElixirPeptide"]
     calories = fmt(data.get("totals", {}).get("kcal", 0))
-    lines.append(f"Питание: ≈ {calories}" + (f" из {fmt(target['kcal'])} ккал" if target.get("kcal") else " ккал; норма не задана"))
-    lines.append("Тренировка: "+("завершена" if w.get("today_workouts") else "запланирована на сегодня" if w.get("today_exercises") else "на сегодня не запланирована"))
+    if target.get("kcal") or data.get("meals") or data.get("totals", {}).get("kcal"):
+        lines.append(f"Питание: ≈ {calories}" + (f" из {fmt(target['kcal'])} ккал" if target.get("kcal") else " ккал"))
+    if w.get("today_workouts") or w.get("today_exercises"):
+        lines.append("Тренировка: "+("завершена" if w.get("today_workouts") else "запланирована на сегодня"))
     if w.get("today_activities"):
-        lines.append("Другая активность: "+"; ".join(f"{e['name']} — {fmt(e['duration_minutes'])} мин" for e in w["today_activities"]))
+        lines.append("Другая активность: "+fmt(sum(e["duration_minutes"] for e in w["today_activities"]))+" мин")
+    if w.get("today_wellbeing"):
+        lines.append("Самочувствие: "+fmt(w["today_wellbeing"][-1]["score"])+"/5")
     now = datetime.fromisoformat(data["now"]) if data.get("now") else None
     events = [e for c in w.get("courses", []) for e in c.get("calendar", [])
         if e["status"] == "pending" and now and datetime.fromisoformat(e["occurred_at"]) >= now]
@@ -400,12 +423,10 @@ def home_view(data):
         next_event = min(events, key=lambda e: datetime.fromisoformat(e["occurred_at"]))
         clock = datetime.fromisoformat(next_event["occurred_at"]).astimezone(zone).strftime("%d.%m в %H:%M")
         lines.append("Курс: следующий приём по расписанию "+clock)
-    else:
-        lines.append("Курс: ближайший приём не запланирован")
     if p.get('current_weight_kg') is not None:
         lines.append(f"Вес: {fmt(p['current_weight_kg'])} кг"+(f", цель: {fmt(p['target_weight_kg'])} кг" if p.get('target_weight_kg') is not None else ""))
-    if not target:
-        lines.append("Для расчёта остатка задайте норму в разделе «Питание → Мои нормы КБЖУ».")
+    if len(lines) == 1:
+        lines.append("Сегодня в дневнике пока нет записей.")
     return "\n".join(lines)
 
 
@@ -615,7 +636,7 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
         kb = keyboard()
         link = specialist_button()
         if link: kb.inline_keyboard.insert(0, [link])
-        await message.answer("Медицинские вопросы и изменение схемы курса обсудите со специалистом. Бот не меняет дозировки. Нажмите кнопку ниже для связи." if link else "Напишите в поддержку @ShostakovIV — вам помогут связаться со специалистом.", reply_markup=kb)
+        await message.answer("Медицинские вопросы и изменение схемы курса обсудите со специалистом. Бот не меняет дозировки. Нажмите кнопку ниже для связи." if link else "Связь со специалистом сейчас недоступна: ссылка на ветку врачей не настроена. По медицинским вопросам обратитесь к своему врачу. Бот не меняет дозировки.", reply_markup=kb)
     elif root == "course_instruction":
         course=next((c for c in w.get("courses", []) if c["id"] == int(action.split(":")[1])), None)
         if not course: raise BridgeError("Курс не найден.")
@@ -679,12 +700,12 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
             await workout_result(message, entry)
             return True
         await state.update_data(workout_id=entry["id"])
-        day = datetime.fromisoformat(data["now"]).astimezone(ZoneInfo(data["settings"]["timezone"])).weekday()
-        planned = [e for e in entry.get("program_exercises", []) if e["weekday"] == day]
+        weekday = datetime.fromisoformat(data["now"]).astimezone(ZoneInfo(data["settings"]["timezone"])).weekday()
+        planned = [e for e in entry.get("program_exercises", []) if e["weekday"] == weekday]
         plan_text = "\n".join(f"{e['name']}: {e['sets']} × {e['reps']}" for e in planned)
-        next_name = next_exercise(entry, day)
+        next_name = next_exercise(entry, weekday)
         await message.answer(("🏋️ Тренировка на сегодня\n"+plan_text) if plan_text else "Сегодня в программе нет упражнений. Можно записать свою тренировку.", parse_mode=None)
-        await begin_set(message, state, entry, day, next_name)
+        await begin_set(message, state, entry, weekday, next_name)
         await message.answer("Когда закончите подходы:", reply_markup=keyboard([("Завершить", f"workout_finish:{entry['id']}"), ("Указать длительность", f"workout_duration:{entry['id']}")]))
     elif root == "set_confirm":
         values = await state.get_data()
@@ -777,9 +798,9 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
             if kind in {"workout", "activity_log", "measurement", "wellbeing"}:
                 text += "\n\n"+draft_text(entry)
         if kind in {"workout", "activity_log", "measurement", "wellbeing"} and isinstance(message, MentorPanel):
-            await message.complete(text, replace=True, reply_markup=keyboard([("Открыть результаты", "workouts" if kind in {"workout", "activity_log"} else "progress")]))
+            await message.complete(text, replace=True, reply_markup=record_keyboard(entry))
         else:
-            await complete_card(message, text, reply_markup=keyboard([("Открыть результаты", {"target":"nutrition", "program":"workouts", "course":"course"}.get(kind, "progress"))]))
+            await complete_card(message, text, reply_markup=record_keyboard(entry))
     elif root == "record_edit":
         _, kind, entry_id = action.split(":")
         await state.update_data(replace_kind="measurement" if kind == "progress_photo" else kind, replace_id=int(entry_id))
@@ -877,6 +898,8 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
             raise BridgeError("Подтвердите удаление заново в разделе «Приватность».")
         reset_mentor_conversations(uid)
         await api("/workspace/privacy/erase", {"telegram_user_id":uid, "confirmed":True})
+        from .mentor_onboarding import erase
+        erase(uid)
         clear_opening_question(uid, opening_question(uid))
         forget_all_deliveries(uid)
         await state.clear()
@@ -902,11 +925,11 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
             prompt = QUESTIONS["reminder_clock"]
             if kind == "weekly": prompt = QUESTIONS["reminder_weekly"]
             if kind == "inactivity": prompt = QUESTIONS["reminder_inactivity"]
-            await form(message, state, "reminder", prompt, reminder_kind=kind)
+            rows = None
             if kind in {"morning", "evening"}:
                 clocks = ("07:00", "08:00", "09:00") if kind == "morning" else ("19:00", "20:00", "21:00")
-                await message.answer(prompt+"\n\nМожно выбрать подходящее время ниже.", reply_markup=keyboard(
-                    [(clock, "reminder_clock:"+clock) for clock in clocks], [("Выключить", "reminder_clock:off")]))
+                rows = [[(clock, "reminder_clock:"+clock) for clock in clocks], [("Выключить", "reminder_clock:off")]]
+            await form(message, state, "reminder", prompt, rows=rows, reminder_kind=kind)
     elif root == "reminder_clock":
         values = await state.get_data()
         if values.get("form_kind") != "reminder" or values.get("reminder_kind") not in {"morning", "evening"}: raise BridgeError("Выберите напоминание заново.")

@@ -12,8 +12,11 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramForbiddenError
+from . import mentor_onboarding
 import config
 from src.ai.mentor_copy import QUESTIONS
+from src.ai.helpers import with_action
+from src.ai.webapp_client import WebappBotApiError
 from src.ai.telegram_mentor import (BridgeError, configured, api, set_mentor_enabled,
     mentor_enabled, save_opening_question, clear_opening_question, opening_question,
     reminder_was_delivered, remember_delivery, forget_delivery)
@@ -53,7 +56,7 @@ SECTIONS = {
         ("♻️ Повторить прошлый приём","repeat_previous"),("⭐ Любимые блюда","favorites"),("🔎 Найти продукт","food_lookup"),("📊 Итоги за сегодня","nutrition"),("🍲 Что мне поесть?","suggest"),("📅 История питания","meals:0"),("🎯 Мои нормы КБЖУ","target")]),
     "progress": ("📊 Прогресс",[("⚖️ Добавить вес","weight"),("📏 Добавить замеры","measurement"),("📷 Добавить фото","progress_photo"),("📈 График веса","weight_chart"),("Последние измерения веса","history"),("Фото и замеры","measurements"),("🏋️ Прогресс тренировок","workout_results"),("📊 Отчёт за неделю","weekly"),("За месяц","monthly")]),
     "plan": ("🎯 Мой план",[("План на сегодня","daily_plan"),("Скорректировать план","adjust")]),
-    "profile": ("Профиль",[("Мои данные и цель","data"),("Изменить цель","goals")]),
+    "profile": ("Профиль",[("Мои данные и цель","data"),("Настроить профиль по шагам","setup_start"),("Изменить цель","goals")]),
     "settings": ("Настройки",[("Напоминания","reminders"),("Часовой пояс","timezone"),("Приватность","privacy")]),
     "ask": ("💬 Спросить наставника",[("🍲 Что поесть?","suggest"),("📊 Проанализировать мой день","analyze_day"),("🏋️ Скорректировать тренировку","reason:workout"),("⚖️ Почему вес стоит?","reason:plateau"),("🧬 Вопрос по моему курсу","specialist"),("💬 Задать свой вопрос","question"),("✏️ Скорректировать план","adjust")])}
 
@@ -99,10 +102,15 @@ async def shop_button(bot):
 
 class MentorNavigationMiddleware(BaseMiddleware):
     async def __call__(self,handler,event,data):
+        from .mentor_onboarding import pause
+        from .mentor_panel import remember_message
+        if isinstance(event, Message) and data.get("state"):
+            await remember_message(data["state"], event)
         callback=getattr(event,"data",None) or ""
         message=getattr(event,"text",None) or ""
         command=message.split(maxsplit=1)[0].split("@")[0] if message else ""
         if callback in {"user:main_menu","user:main_menuu","user:ai:start","user:ai:free","user:ai:premium"} or command=="/start":
+            pause(event.from_user.id)
             if mentor_enabled(event.from_user.id) and configured():
                 try:
                     await api("/workspace/workout/discard-empty", {"telegram_user_id": event.from_user.id})
@@ -121,6 +129,13 @@ def fmt(value):
 
 async def enter(message,user_id,state,*,onboarding=True):
     if not configured(): return await message.answer("Наставник пока недоступен. Попробуйте позже.")
+    from .mentor_access import check_mentor_phone
+    try:
+        if onboarding and await check_mentor_phone(message, user_id, state):
+            return
+    except WebappBotApiError:
+        return await message.answer("Сейчас не удалось проверить доступ. Попробуйте открыть наставника ещё раз через минуту.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[button("Попробовать ещё раз", "open")]]), parse_mode=None)
     from .mentor_panel import MentorPanel, ReplyCards, clear_input
     await clear_input(state);set_mentor_enabled(user_id,True)
     if not isinstance(message, MentorPanel):
@@ -128,6 +143,12 @@ async def enter(message,user_id,state,*,onboarding=True):
     clear_opening_question(user_id,opening_question(user_id))
     try:
         saved=await api("/dashboard",{"telegram_user_id":user_id});p=saved.get("profile",{})
+        from . import mentor_onboarding as setup
+        progress = setup.load(user_id)
+        if onboarding and progress.get("status") == "active":
+            return await setup.resume(message, user_id)
+        if onboarding and setup.needs_profile(saved) and progress.get("status") != "complete":
+            return await setup.offer(message, user_id)
         from .mentor_flows import home_view
         text=home_view(saved)
         question="С чем хотите помочь себе сегодня?" if onboarding else None
@@ -136,7 +157,11 @@ async def enter(message,user_id,state,*,onboarding=True):
     except BridgeError:
         saved = {}
         text="Наставник ElixirPeptide\n\nПрофиль сейчас не загрузился. Можно продолжить разговор или попробовать открыть меню позже."
-    await message.answer(text,reply_markup=menu(saved.get("workspace", {}).get("sections")),parse_mode=None)
+    kb = menu(saved.get("workspace", {}).get("sections"))
+    from . import mentor_onboarding as setup
+    if setup.load(user_id).get("status") == "paused" or setup.needs_profile(saved):
+        kb.inline_keyboard.insert(0, [button("Продолжить настройку профиля", "setup_start")])
+    await message.answer(text,reply_markup=kb,parse_mode=None)
 
 
 @router.message(Command("mentor"))
@@ -192,9 +217,10 @@ def history_text(data):
 
 
 def profile_text(p):
+    from .mentor_format import ACTIVITY
     labels={"goal":"Цель","goal_detail":"Подробности цели","age":"Возраст","sex":"Пол","height_cm":"Рост, см","current_weight_kg":"Вес, кг",
         "target_weight_kg":"Целевой вес, кг","activity":"Активность","preferences":"Предпочтения","restrictions":"Ограничения"}
-    values={"weight_loss":"снижение веса","maintain":"поддержание","weight_gain":"набор веса","custom":"своя цель","male":"мужской","female":"женский"}
+    values={"weight_loss":"снижение веса","maintain":"поддержание","weight_gain":"набор веса","custom":"своя цель","male":"мужской","female":"женский", **ACTIVITY}
     lines=[f"{label}: {fmt(p[key]) if isinstance(p[key], (int, float)) else values.get(str(p[key]),p[key])}" for key,label in labels.items() if p.get(key) is not None]
     filled = bool(lines)
     if p.get("sex") is None: lines.append("Пол: не указан")
@@ -257,16 +283,23 @@ async def run_ai_action(query,state,professor_bot,professor_client,expert_client
 
 @router.callback_query(F.data.startswith("mentor:"))
 async def mentor_action(query:CallbackQuery,state:FSMContext,professor_bot=None,professor_client=None,expert_client=None):
-    from .mentor_panel import MentorPanel, navigate_page
+    from .mentor_panel import MentorPanel, navigate_page, navigation_mode
     if query.data == "mentor:receipt":
         return await query.answer("Это действие уже выполнено.")
     if query.data.startswith("mentor:page:"):
         return await navigate_page(query, state)
     saved = await state.get_data()
+    action = query.data.removeprefix("mentor:")
+    owned_confirmation = action.split(":", 1)[0] in {"meal_confirm", "meal_cancel", "record", "input_save"}
+    if not owned_confirmation and navigation_mode(query.message, saved, action=action) == "ignore":
+        return await query.answer("Актуальное меню находится ниже в переписке.")
     panel = MentorPanel(query.message, state, saved_card=saved.get("mentor_panel", {}),
         cards=saved.get("mentor_cards", []), action=query.data.removeprefix("mentor:"))
     try:
         await perform_action(query, state, panel, professor_bot, professor_client, expert_client)
+    except (BridgeError, WebappBotApiError):
+        log.warning("Mentor navigation service unavailable | action=%s", action.split(":", 1)[0])
+        await panel.answer("Сейчас не удалось загрузить этот шаг. Ваши записи сохранились; попробуйте ещё раз.", reply_markup=back_keyboard())
     finally:
         await panel.flush()
 
@@ -274,6 +307,23 @@ async def mentor_action(query:CallbackQuery,state:FSMContext,professor_bot=None,
 async def perform_action(query,state,message,professor_bot=None,professor_client=None,expert_client=None):
     uid=query.from_user.id;action=query.data.removeprefix("mentor:")
     await query.answer()
+    from . import mentor_onboarding as setup
+    if action.startswith("setup:"):
+        try:
+            return await setup.callback(query, state, message)
+        except BridgeError as error:
+            return await message.answer(str(error), parse_mode=None)
+    if action == "setup_start":
+        from .mentor_access import check_mentor_phone
+        if await check_mentor_phone(message, uid, state, query.from_user.full_name):
+            return
+        from .mentor_panel import clear_input
+        await clear_input(state)
+        set_mentor_enabled(uid, True)
+        clear_opening_question(uid, opening_question(uid))
+        return await setup.resume(message, uid)
+    if action not in {"open", "start"}:
+        setup.pause(uid)
     # Navigation invalidates in-flight extraction; only its own review buttons keep a pending write.
     await state.update_data(form_token=secrets.token_hex(8),
         **({} if action.startswith(("input_save:", "input_edit:")) else {"pending_input": None}))
@@ -292,6 +342,10 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
     await state.set_state(None);clear_opening_question(uid,opening_question(uid))
     try:
         from .mentor_flows import dispatch
+        if action == "target_auto":
+            saved = await api("/dashboard", {"telegram_user_id": uid})
+            if setup.needs_profile(saved):
+                return await setup.resume(message, uid)
         if await dispatch(query, state, action, professor_bot, professor_client, expert_client, panel=message): return
         if action in SECTIONS:
             saved = await api("/dashboard", {"telegram_user_id": uid}) if action == "ask" else {}
@@ -334,7 +388,9 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
                 remaining=saved.get("workspace", {}).get("remaining") or {}
                 if remaining:
                     text+="\n\nОсталось: "+"; ".join(f"{fmt(remaining[k])} {unit}" for k,unit in [("kcal","ккал"),("protein","г белка")] if k in remaining)
-            return await message.complete(text,reply_markup=section_keyboard('food'),replace=True)
+            from .mentor_flows import keyboard
+            return await message.complete(text,reply_markup=keyboard(
+                [("Добавить еду", "meal")], [("Итоги за сегодня", "nutrition")]) ,replace=True)
         if action=="reminders": return await show_reminders(message,uid)
         if action.startswith("remind:"):
             value=action.removeprefix("remind:")
@@ -348,6 +404,14 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
     except (BridgeError,ValueError) as error:
         text=str(error) if isinstance(error,BridgeError) else "Не удалось обработать действие. Откройте меню и попробуйте снова."
         await message.answer(text,reply_markup=back_keyboard(),parse_mode=None)
+
+
+@router.message(lambda message: not (message.text or "").startswith("/") and not message.contact
+                and mentor_onboarding.active(message.from_user.id))
+@with_action()
+async def onboarding_input(message: Message, state: FSMContext, professor_client=None, professor_bot=None, expert_client=None):
+    from .mentor_onboarding import receive
+    await receive(message, state, professor_client, professor_bot, expert_client)
 
 
 @router.message(WeightInput.value)

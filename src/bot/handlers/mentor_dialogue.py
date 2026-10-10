@@ -20,7 +20,11 @@ async def dispatch_dialogue(query, state, action, message, professor_bot, profes
         await clear_input(state)
         await run_ai_action(query, state, professor_bot, professor_client, expert_client, TASKS[action])
         return True
-    if action in {"weight", "custom_goal"}:
+    if action == "weight":
+        from .mentor_flows import form
+        await form(message, state, "weight", QUESTIONS["weight"])
+        return True
+    if action == "custom_goal":
         await ask(message, query.from_user.id, QUESTIONS[action],
             context="Продолжи общий диалог. Используй актуальный профиль и сохраняй только явно сообщённые факты через update_mentor_profile. Не начинай отдельную анкету.")
         return True

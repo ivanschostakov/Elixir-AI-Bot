@@ -143,7 +143,7 @@ def test_cancelled_step_discards_in_flight_model_result(monkeypatch):
 
 def test_privacy_reset_discards_model_result_even_when_step_token_did_not_change():
     state=State(form_kind="weight",form_token="old")
-    msg=message("75")
+    msg=message("Сейчас мой вес семьдесят пять килограммов")
     client=client_for({"weight":75})
     async def respond(**kwargs):
         t.reset_mentor_conversations(123)
@@ -151,6 +151,13 @@ def test_privacy_reset_discards_model_result_even_when_step_token_did_not_change
     client.responses.parse.side_effect=respond
     assert asyncio.run(n.parse_step(msg,state,"weight",client)) is None
     msg.answer.assert_not_awaited()
+
+
+def test_plain_weight_uses_validated_numeric_path_without_ai():
+    state=State(form_kind="weight",form_token="current")
+    client=client_for({})
+    assert asyncio.run(n.parse_step(message("75,5 кг"),state,"weight",client)) == "75.5"
+    client.responses.parse.assert_not_awaited()
 
 
 def test_refused_or_incomplete_provider_response_does_not_save(monkeypatch):

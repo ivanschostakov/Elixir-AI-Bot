@@ -14,6 +14,7 @@ from aiogram.types import FSInputFile, Message, CallbackQuery, ReplyKeyboardRemo
 
 from config import OWNER_TG_IDS, UFA_TZ, DATA_DIR, WEBAPP_BASE_DOMAIN
 from src.bot.handlers.new_user_helpers import _get_unverified_requests_count, _request_phone, _ensure_user, _should_spend_premium_request, _can_use_professor_mode, _resolve_mode_client, _resolve_last_used, LAST_USED_EXPERT, LAST_USED_PROFESSOR, UNVERIFIED_REQUEST_LIMIT
+from src.bot.handlers.mentor_access import consume_mentor_phone_input, phone_registration_lock, resume_mentor_phone
 from src.calc import generate_drug_graphs, plot_filled_scale
 from src.ai.helpers import CHAT_NOT_BANNED_FILTER, _notify_user, with_action, _fmt, check_blocked
 from src.ai.webapp_client import WebappBotApiError, webapp_client
@@ -320,13 +321,20 @@ async def handle_verification_code(message: Message, state: FSMContext):
 
 
 @professor_user_router.message(user_states.Registration.phone)
-async def handle_user_registration(message: Message, state: FSMContext, professor_bot, professor_client):
-    if not message.contact: return await message.answer(user_texts.verify_phone.replace('*', message.from_user.full_name), reply_markup=user_keyboards.phone)
-    phone = message.contact.phone_number
-    await state.clear()
-    await professor_bot.create_user(message.from_user.id, normalize_phone(phone), message.from_user.first_name, message.from_user.last_name)
-    await message.answer('Проверка пройдена успешно ✅', reply_markup=ReplyKeyboardRemove())
-    return await handle_user_start(message, state)
+async def handle_user_registration(message: Message, state: FSMContext, professor_bot, professor_client, expert_client=None):
+    if not message.contact or message.contact.user_id != message.from_user.id:
+        return await message.answer(user_texts.verify_phone.replace('*', message.from_user.full_name), reply_markup=user_keyboards.phone)
+    phone = normalize_phone(message.contact.phone_number)
+    if not phone:
+        return await message.answer(user_texts.verify_phone.replace('*', message.from_user.full_name), reply_markup=user_keyboards.phone)
+    async with phone_registration_lock(state):
+        if await state.get_state() != user_states.Registration.phone.state:
+            return None
+        await professor_bot.create_user(message.from_user.id, phone, message.from_user.first_name, message.from_user.last_name)
+        await message.answer('Проверка пройдена успешно ✅', reply_markup=ReplyKeyboardRemove())
+        if await resume_mentor_phone(message, state, professor_bot, professor_client, expert_client):
+            return None
+        return await handle_user_start(message, state)
 
 @professor_user_router.message(user_states.CalculateClicks.cartridge_volume, lambda message: message.text and message.text.strip())
 async def handle_cartridge_volume(message: Message, state: FSMContext):
@@ -581,6 +589,10 @@ async def handle_user_call(call: CallbackQuery, state: FSMContext):
 @professor_user_router.message(MediaGroupFilter())
 @media_group_handler()
 async def handle_media_group(messages: list[Message], state: FSMContext, professor_bot, professor_client, expert_client=None):
+    return await _handle_media_group(messages, state, professor_bot, professor_client, expert_client)
+
+
+async def _handle_media_group(messages: list[Message], state: FSMContext, professor_bot, professor_client, expert_client=None):
     message = messages[0]
     user_id = message.from_user.id
 
@@ -599,11 +611,12 @@ async def handle_media_group(messages: list[Message], state: FSMContext, profess
     if user.tg_phone: schedule_webapp_call(safe_webapp_call(webapp_client.update_user_name(user_id, message.from_user.first_name, message.from_user.last_name), operation="update_user_name"), operation="update_user_name")
 
     used_requests = 0 if user.tg_phone else await _get_unverified_requests_count(user_id)
-    if not user.tg_phone and (last_used == LAST_USED_PROFESSOR or used_requests >= UNVERIFIED_REQUEST_LIMIT): return await _request_phone(message, state)
+    if not user.tg_phone and (last_used == LAST_USED_PROFESSOR or used_requests >= UNVERIFIED_REQUEST_LIMIT): return await _request_phone(message, state, mentor_input=messages)
     if last_used == LAST_USED_PROFESSOR and not _can_use_professor_mode(user): return await message.answer(user_texts.premium_limit_0, reply_markup=user_keyboards.only_free)
 
     response = await safe_ai_response(message, send_message_v2_from_media_group(messages=messages, professor_client=active_client, user_id=user_id, conversation_id=user.conversation_id))
     if response is None: return None
+    await consume_mentor_phone_input(messages, state)
     schedule_webapp_call(
         safe_webapp_call(
             webapp_client.write_usage(
@@ -624,7 +637,8 @@ async def handle_media_group(messages: list[Message], state: FSMContext, profess
     if response.get("mentor"):
         from .mentor_flows import remember_response
         await remember_response(state, response)
-    return await professor_bot.parse_response(response, message, back_menu=True)
+    return await professor_bot.parse_response(response, message, back_menu=True,
+        **({"mentor_state": state} if response.get("mentor") else {}))
 
 
 @professor_user_router.message(lambda message: not message.media_group_id and ((message.text and message.text.strip()) or (message.caption and message.caption.strip()) or message.photo or message.video or message.video_note or message.document or message.voice))
@@ -653,11 +667,12 @@ async def handle_single_ai_message(message: Message, state: FSMContext, professo
     if user.tg_phone:schedule_webapp_call(safe_webapp_call(webapp_client.update_user_name(user_id, message.from_user.first_name, message.from_user.last_name), operation="update_user_name"), operation="update_user_name")
 
     used_requests = 0 if user.tg_phone else await _get_unverified_requests_count(user_id)
-    if not user.tg_phone and (last_used == LAST_USED_PROFESSOR or used_requests >= UNVERIFIED_REQUEST_LIMIT): return await _request_phone(message, state)
+    if not user.tg_phone and (last_used == LAST_USED_PROFESSOR or used_requests >= UNVERIFIED_REQUEST_LIMIT): return await _request_phone(message, state, mentor_input=[message])
     if last_used == LAST_USED_PROFESSOR and not _can_use_professor_mode(user): return await message.answer(user_texts.premium_limit_0, reply_markup=user_keyboards.only_free)
 
     response = await safe_ai_response(message, send_message_v2_from_telegram(message=message, professor_client=active_client, user_id=user_id, conversation_id=user.conversation_id))
     if response is None: return None
+    await consume_mentor_phone_input([message], state)
     if response.get("mentor"):
         from .mentor_flows import remember_response
         await remember_response(state, response)
@@ -678,4 +693,5 @@ async def handle_single_ai_message(message: Message, state: FSMContext, professo
         next_requests = max(int(getattr(user, "premium_requests", 0) or 0) - 1, 0)
         schedule_webapp_call(safe_webapp_call(webapp_client.update_user(message.from_user.id, {"premium_requests": next_requests}), operation="decrement_premium_requests"),operation="decrement_premium_requests")
 
-    return await professor_bot.parse_response(response, message, back_menu=True)
+    return await professor_bot.parse_response(response, message, back_menu=True,
+        **({"mentor_state": state} if response.get("mentor") else {}))

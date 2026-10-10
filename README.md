@@ -19,13 +19,26 @@ Profile and Settings. Confirmed meals, training sets, existing course schedules,
 measurements and notification rules are stored through the signed shop API.
 Ordinary AI conversations, subscription checks and media limits are unchanged.
 
+First-time users are offered one question at a time: goal, age, sex, height,
+weight, activity, habits and a confirmed local timezone. Explicit answers are
+saved through the existing profile API; the small onboarding cursor is persisted
+in `data/telegram_mentor_modes.sqlite3` so setup can resume after restart.
+Existing facts are not requested again. Nutrition uses the same guarded backend
+calculator and must be explicitly confirmed before becoming the daily target.
+Weight buttons keep a dedicated input context and show a review before saving.
+Menus edit only the latest service card; conversation answers remain in history.
+The existing phone gate resumes the unprocessed mentor request after receiving
+the user's own contact. Media, subscriptions and usage accounting stay unchanged.
+
+No backend migration or mobile OTA is required for this Telegram update.
+
 Deploy the matching Shop Application backend before restarting this bot.
 The reminder protocol uses leases and delivery acknowledgements; stop the old bot
 while changing the backend contract, and roll both back together if needed.
 Preserve `.env`, `data/`, instruction files and Telegram sessions.
 
 Configuration: `TELEGRAM_MENTOR_CLOSED_SECTIONS` is empty by default;
-`TELEGRAM_MENTOR_SPECIALIST_URL` must be an explicitly approved HTTPS destination.
+`TELEGRAM_MENTOR_SPECIALIST_URL` must be an explicitly approved Telegram topic URL.
 The bot never generates medical prescriptions or changes doses itself.
 Implementation and operational details are maintained in the Shop Application
 repository at `integrations/telegram-ai-bot/README.md`.
@@ -71,7 +84,7 @@ Configuration notes:
 Run the deterministic test suite without starting Telegram polling:
 
 ```bash
-python -m unittest discover -s tests -p 'test_*.py'
+python -m pytest -q tests
 ```
 
 `tests/gm.py` is a manual Telegram integration check. It requires `GUEST_TEST_BOT_TOKEN` and should not be run in automated CI.

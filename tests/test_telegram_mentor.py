@@ -138,10 +138,11 @@ def test_regular_provider_request_has_original_prompt_and_tools(monkeypatch, tmp
 
 
 def test_mentor_entry_uses_saved_profile_and_asks_one_question(monkeypatch):
-    from src.bot.handlers import mentor
+    from src.bot.handlers import mentor, mentor_access
     from test_telegram_flows import State
     monkeypatch.setattr(mentor,'configured',lambda:True)
-    monkeypatch.setattr(mentor,'api',AsyncMock(return_value={'profile':{'goal':'weight_loss','age':19,'height_cm':183,'current_weight_kg':110,'target_weight_kg':90},'version':1}))
+    monkeypatch.setattr(mentor_access, 'check_mentor_phone', AsyncMock(return_value=False))
+    monkeypatch.setattr(mentor,'api',AsyncMock(return_value={'profile':{'goal':'weight_loss','age':19,'sex':'male','activity':'light','height_cm':183,'current_weight_kg':110,'target_weight_kg':90},'version':1}))
     msg=SimpleNamespace(answer=AsyncMock())
     asyncio.run(mentor.enter(msg,456,State()))
     assert t.mentor_enabled(456)

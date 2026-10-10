@@ -92,7 +92,7 @@ def test_home_summary_uses_saved_values_and_never_invents_a_course():
     result = f.home_view(data)
     assert "🌿 Наставник ElixirPeptide" in result
     assert "1 240 из 1 900" in result and "90 кг" in result
-    assert "ближайший приём не запланирован" in result
+    assert "Курс:" not in result and "не запланирован" not in result
     assert "20:00" not in result
 
 
@@ -232,11 +232,12 @@ def test_failed_form_does_not_claim_save(monkeypatch):
 
 def test_specialist_link_is_never_invented(monkeypatch):
     monkeypatch.delenv("TELEGRAM_MENTOR_SPECIALIST_URL", raising=False)
-    assert f.specialist_button().url == "https://t.me/ShostakovIV"
+    monkeypatch.delenv("TELEGRAM_MENTOR_SUPPORT_URL", raising=False)
+    assert f.specialist_button() is None
     monkeypatch.setenv("TELEGRAM_MENTOR_SPECIALIST_URL", "javascript:alert(1)")
     assert f.specialist_button() is None
-    monkeypatch.setenv("TELEGRAM_MENTOR_SPECIALIST_URL", "https://example.test/specialist")
-    assert f.specialist_button().url == "https://example.test/specialist"
+    monkeypatch.setenv("TELEGRAM_MENTOR_SPECIALIST_URL", "https://t.me/doctors/123")
+    assert f.specialist_button().url == "https://t.me/doctors/123"
 
 
 def test_course_interval_is_visible_and_dose_is_verbatim():

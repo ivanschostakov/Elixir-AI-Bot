@@ -9,6 +9,7 @@ from src.ai import mentor_input as n, telegram_mentor as t
 from src.ai.mentor_copy import QUESTIONS
 from src.bot.handlers import mentor, mentor_flows as f
 from src.bot.handlers.mentor_insights import daily_insight, weekly_insight
+from src.bot.handlers.mentor_panel import UI_KEYS
 from test_mentor_input import client_for, message
 from test_telegram_flows import State, dashboard
 
@@ -53,7 +54,7 @@ def test_intents_do_not_turn_into_names_or_records(monkeypatch, intent, kind):
     if intent == "question":
         converse.assert_awaited_once()
         assert state.values["form_known"]["sets"] == 3
-    elif intent == "cancel": assert state.values == {}
+    elif intent == "cancel": assert {k: v for k, v in state.values.items() if k not in UI_KEYS} == {}
     else: assert state.values["form_paused"] and state.values["form_known"] == {"sets":3}
 
 
@@ -93,7 +94,7 @@ def test_input_edit_keeps_other_collected_fields():
 
 
 def test_text_confirmation_is_idempotent_and_only_uses_existing_preview(monkeypatch):
-    api = AsyncMock(return_value={"ok":True})
+    api = AsyncMock(return_value={"ok":True, "entry":{"id":7,"kind":"meal","status":"confirmed","name":"Обед"}})
     monkeypatch.setattr(f, "api", api)
     state = State(pending_reviews=[{"id":7,"kind":"meal","name":"Обед"}])
     msg = message("да, сохрани")
@@ -189,7 +190,7 @@ def test_replaced_meal_is_not_an_ambiguous_pending_review():
 
 
 def test_concurrent_text_confirmations_only_write_once(monkeypatch):
-    api = AsyncMock(return_value={"ok":True})
+    api = AsyncMock(return_value={"ok":True, "entry":{"id":7,"kind":"meal","status":"confirmed"}})
     monkeypatch.setattr(f,"api",api)
     state = State(pending_reviews=[{"id":7,"kind":"meal"}])
     async def run():
