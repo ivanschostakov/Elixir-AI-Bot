@@ -43,10 +43,33 @@ def period(start, end):
 
 
 def timezone_label(value):
-    return {"Europe/Moscow": "Москва (UTC+3)", "Asia/Yekaterinburg": "Екатеринбург (UTC+5)", "UTC": "UTC+0"}.get(value, value)
+    from datetime import datetime
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    names = {"Europe/Moscow": "Москва", "Asia/Yekaterinburg": "Екатеринбург", "Asia/Almaty": "Алматы",
+        "Asia/Yerevan": "Ереван", "Asia/Tbilisi": "Тбилиси", "Europe/Kaliningrad": "Калининград",
+        "Asia/Novosibirsk": "Новосибирск", "Asia/Vladivostok": "Владивосток", "UTC": "UTC"}
+    try:
+        offset = datetime.now(ZoneInfo(value)).utcoffset().total_seconds() / 3600
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        return value
+    return f"{names.get(value, value.rsplit('/', 1)[-1].replace('_', ' '))} (UTC{offset:+g})"
+
+
+def local_datetime(value, zone):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    parsed = datetime.fromisoformat(value).astimezone(ZoneInfo(zone))
+    return f"{day(parsed.date().isoformat())}, {parsed:%H:%M}"
+
+
+def count_text(value, forms):
+    count = abs(int(value))
+    word = forms[2] if 11 <= count % 100 <= 14 else forms[0] if count % 10 == 1 else forms[1] if 2 <= count % 10 <= 4 else forms[2]
+    return f"{value} {word}"
 
 
 def html_text(text):
     # Escape first: model HTML is never trusted; underscores in URLs stay literal.
     text = escape(text, quote=False)
+    text = re.sub(r"(?m)^\s*#{1,6}\s+(.+?)\s*$", lambda m: "<b>"+m[1].strip("* ")+"</b>", text)
     return re.sub(r"(?<!\w)(\*\*|\*)([^*\n]+?)\1(?!\w)", lambda m: "<b>"+m[2]+"</b>", text)

@@ -24,6 +24,16 @@ async def dispatch_dialogue(query, state, action, message, professor_bot, profes
         from .mentor_flows import form
         await form(message, state, "weight", QUESTIONS["weight"])
         return True
+    if action.startswith("measurement_add:"):
+        from src.ai.telegram_mentor import api, BridgeError
+        entry_id = int(action.split(":")[1])
+        entry = (await api("/workspace/record", {"telegram_user_id": query.from_user.id, "entry_id": entry_id}))["entry"]
+        if entry.get("kind") != "measurement" or entry.get("status") != "draft":
+            raise BridgeError("Этот черновик уже обработан. Новый замер можно добавить в разделе «Прогресс».")
+        await ask(message, query.from_user.id,
+            "Какой ещё замер добавим к этой записи? Например, бёдра 104 см. Уже указанные значения оставлю без изменений.",
+            context=f"Добавляется необязательный замер к черновику measurement №{entry_id}. Прочитай через get_mentor_record, сохрани остальные значения и создай новый черновик с replaces_id={entry_id}. Нужно одно подтверждение всей записи.")
+        return True
     if action == "custom_goal":
         await ask(message, query.from_user.id, QUESTIONS[action],
             context="Продолжи общий диалог. Используй актуальный профиль и сохраняй только явно сообщённые факты через update_mentor_profile. Не начинай отдельную анкету.")

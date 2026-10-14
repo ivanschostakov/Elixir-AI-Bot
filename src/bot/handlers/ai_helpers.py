@@ -292,7 +292,7 @@ async def send_message_v2_from_media_group(messages: Sequence[Message], professo
     return response
 
 
-async def safe_ai_response(message: Message, request_coro, *, error_text: str = AI_TEMPORARY_ERROR_TEXT, timeout_text: str = AI_TIMEOUT_ERROR_TEXT, timeout_seconds: float = float(AI_REQUEST_TIMEOUT_SECONDS)) -> dict[str, Any] | None:
+async def safe_ai_response(message: Message, request_coro, *, error_text: str = AI_TEMPORARY_ERROR_TEXT, timeout_text: str = AI_TIMEOUT_ERROR_TEXT, timeout_seconds: float = float(AI_REQUEST_TIMEOUT_SECONDS), notify_errors: bool = True) -> dict[str, Any] | None:
     started_at = time.monotonic()
     user_id = getattr(getattr(message, "from_user", None), "id", None)
     message_id = getattr(message, "message_id", None)
@@ -300,24 +300,29 @@ async def safe_ai_response(message: Message, request_coro, *, error_text: str = 
 
     try:
         result = await asyncio.wait_for(request_coro, timeout=timeout_seconds)
+        if result and result.get("mentor") and not str(result.get("text") or "").strip() and not result.get("files"):
+            raise BridgeError("Не удалось получить ответ наставника. Попробуйте ещё раз.")
         ai_pipeline_logger.info("AI wrapper done | user_id=%s | message_id=%s | elapsed_ms=%d | ok=%s", user_id, message_id, _elapsed_ms(started_at), result is not None)
         return result
 
     except BridgeError as error:
-        await message.answer(str(error), parse_mode=None)
+        if notify_errors:
+            await message.answer(str(error), parse_mode=None)
         return None
 
     except asyncio.CancelledError: raise
     except asyncio.TimeoutError:
         ai_pipeline_logger.error("AI wrapper timeout | user_id=%s | message_id=%s | elapsed_ms=%d | timeout_s=%s", user_id, message_id, _elapsed_ms(started_at), timeout_seconds)
-        try: await message.answer(timeout_text)
+        try:
+            if notify_errors: await message.answer(timeout_text)
         except Exception: pass
         return None
 
     except Exception as e:
         ai_pipeline_logger.exception(f"AI wrapper failed {e} | user_id=%s | message_id=%s | elapsed_ms=%d", user_id, message_id, _elapsed_ms(started_at))
         logging.getLogger(__name__).exception(f"AI request failed for user_id=%s: {e}", getattr(getattr(message, "from_user", None), "id", None))
-        try: await message.answer(error_text)
+        try:
+            if notify_errors: await message.answer(error_text)
         except Exception: pass
         return None
 

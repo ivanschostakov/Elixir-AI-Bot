@@ -58,13 +58,18 @@ def test_long_text_is_paginated_without_truncating_or_sending():
     asyncio.run(run())
 
 
-def test_stale_page_cannot_replace_current_screen():
+def test_stale_page_cannot_replace_current_screen(monkeypatch):
+    from src.bot.handlers import mentor
+    enter = AsyncMock()
+    monkeypatch.setattr(mentor, "enter", enter)
     async def run():
         msg, state = message(), State()
-        query = SimpleNamespace(data="mentor:page:old:0", message=msg, answer=AsyncMock())
+        query = SimpleNamespace(data="mentor:page:old:0", message=msg, from_user=SimpleNamespace(id=123), answer=AsyncMock())
         await navigate_page(query, state)
         msg.edit_text.assert_not_awaited()
         query.answer.assert_awaited_once()
+        enter.assert_awaited_once()
+        assert enter.await_args.args[0].action == "menu"
     asyncio.run(run())
 
 

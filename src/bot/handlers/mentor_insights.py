@@ -16,7 +16,8 @@ def weekly_insight(data):
     report = data.get("workspace", {}).get("weekly", {})
     days = report.get("nutrition_days", 0)
     if days < 3:
-        return f"За период питание записано за {days} дн. По этому нельзя судить о всём рационе. Начните с регулярной записи одного привычного приёма пищи."
+        from .mentor_format import count_text
+        return "За период питание записано за "+count_text(days, ("день", "дня", "дней"))+". По этому нельзя судить о всём рационе. Начните с регулярной записи одного привычного приёма пищи."
     protein = report.get("protein_target_percent")
     if protein is not None and protein < 90:
         return "В записанные дни белка в среднем меньше вашей сохранённой нормы. Разберём один обычный день и подберём подходящее блюдо, не меняя норму автоматически."

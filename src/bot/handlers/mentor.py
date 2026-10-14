@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import logging
+import re
 import secrets
 import time
 from datetime import datetime
@@ -25,6 +26,7 @@ router = Router(name="telegram_mentor")
 router.message.filter(F.chat.type == "private")
 router.callback_query.filter(F.message.chat.type == "private")
 log = logging.getLogger("telegram_mentor")
+_running_ai_callbacks = set()
 
 
 class SettingsInput(StatesGroup):
@@ -74,6 +76,10 @@ def back_keyboard():
 
 def response_keyboard(response):
     keyboard=back_keyboard()
+    from .mentor_food import food_response_rows
+    keyboard.inline_keyboard[0:0] = food_response_rows(response)
+    if response.get("instruction_course_id") and re.search(r"(?:хотите|хочешь|нужно ли)[^\n]*\?", response.get("text", ""), re.I):
+        keyboard.inline_keyboard.insert(0, [button("Да, кратко перечислить", f"instruction_more:{response['instruction_course_id']}")])
     draft=response.get("meal_draft")
     if draft:
         keyboard.inline_keyboard.insert(0,[button("✅ Записать в дневник",f"meal_confirm:{draft['id']}"),button("❌ Отменить",f"meal_cancel:{draft['id']}")])
@@ -89,6 +95,8 @@ def response_keyboard(response):
             "measurement": "Сохранить замеры", "wellbeing": "Сохранить самочувствие"}.get(entry["kind"], "Сохранить запись")
         keyboard.inline_keyboard.insert(0, [button(label, f"record:confirm:{entry['id']}"), button("Отмена", f"record:cancel:{entry['id']}")])
         keyboard.inline_keyboard.insert(1, [button("Изменить", f"record_edit:{entry['kind']}:{entry['id']}")])
+        if entry["kind"] == "measurement":
+            keyboard.inline_keyboard.insert(1, [button("➕ Добавить замер", f"measurement_add:{entry['id']}")])
     return keyboard
 
 
@@ -211,7 +219,7 @@ def history_text(data):
         lines.append(f"{date} — {fmt(w['weight_kg'])} кг")
     if len(weights)>1:
         diff=weights[-1]['weight_kg']-weights[0]['weight_kg']
-        lines.append(f"\nИзменение за показанную историю: {diff:+g} кг")
+        lines.append("\nИзменение за показанную историю: " + f"{diff:+g}".replace(".", ",") + " кг")
     else: lines.append("\nДля сравнения нужно ещё одно измерение.")
     return "\n".join(lines)
 
@@ -250,13 +258,27 @@ async def show_reminders(message,uid):
     return await reminders_view(message, uid)
 
 
-async def run_ai_action(query,state,professor_bot,professor_client,expert_client,text):
+async def run_ai_action(query,state,professor_bot,professor_client,expert_client,text,*,instruction_context=None):
+    key = (query.from_user.id, query.data)
+    if key in _running_ai_callbacks:
+        await query.answer("Уже готовлю ответ на этот запрос.")
+        return True
+    _running_ai_callbacks.add(key)
+    try:
+        return await _run_ai_action(query, state, professor_bot, professor_client, expert_client, text,
+            instruction_context=instruction_context)
+    finally:
+        _running_ai_callbacks.discard(key)
+
+
+async def _run_ai_action(query,state,professor_bot,professor_client,expert_client,text,*,instruction_context=None):
     from src.ai.helpers import check_blocked, CHAT_NOT_BANNED_FILTER
     from src.bot.handlers.new_user import handle_single_ai_message
     if not await check_blocked(query) or not await CHAT_NOT_BANNED_FILTER(query): return
     # Same model/phone/quota/usage path as typed messages; only the chosen prompt is synthetic.
     started = time.monotonic()
-    status = await query.message.answer("⏳ Подбираю…" if query.data == "mentor:suggest" else "⏳ Считаю…", parse_mode=None)
+    status_text = "⏳ Подбираю…" if query.data == "mentor:suggest" else "⏳ Готовлю инструкцию…" if query.data.startswith("mentor:course_instruction:") else "⏳ Готовлю ответ…"
+    status = await query.message.answer(status_text, parse_mode=None)
     message=query.message.model_copy(update={"from_user":query.from_user,"text":text,"caption":None,
         "photo":None,"document":None,"video":None,"voice":None,"video_note":None,
         "message_id":status.message_id})
@@ -264,8 +286,19 @@ async def run_ai_action(query,state,professor_bot,professor_client,expert_client
     retry = InlineKeyboardMarkup(inline_keyboard=[[button("Повторить", query.data.removeprefix("mentor:"))], [button("← Меню наставника", "menu")]])
     from src.ai.telegram_mentor import button_action
     task_token = button_action.set(query.data.removeprefix("mentor:"))
+    cached = None
+    sink = None
+    if query.data.startswith("mentor:course_instruction:"):
+        from . import mentor_instruction_cache as cache
+        course_id = int(query.data.rsplit(":", 1)[-1])
+        key = cache.cache_key(text, instruction_context or {})
+        cached = cache.load(query.from_user.id, key)
+        def sink(response, mode):
+            response["instruction_course_id"] = course_id
+            cache.store(query.from_user.id, key, response, mode)
     try:
-        result = await handle_single_ai_message(message,state,professor_bot,professor_client,expert_client)
+        result = await handle_single_ai_message(message,state,professor_bot,professor_client,expert_client,
+            callback_error_owner=True, cached_response=cached, response_sink=sink)
     except Exception:
         log.exception("Mentor AI callback failed | action=%s", query.data.split(":")[1])
         await status.edit_text("Не удалось получить ответ. Попробуйте ещё раз.", parse_mode=None,
@@ -291,8 +324,8 @@ async def mentor_action(query:CallbackQuery,state:FSMContext,professor_bot=None,
     saved = await state.get_data()
     action = query.data.removeprefix("mentor:")
     owned_confirmation = action.split(":", 1)[0] in {"meal_confirm", "meal_cancel", "record", "input_save"}
-    if not owned_confirmation and navigation_mode(query.message, saved, action=action) == "ignore":
-        return await query.answer("Актуальное меню находится ниже в переписке.")
+    if not owned_confirmation and navigation_mode(query.message, saved, action=action) == "already_open":
+        return await query.answer("Этот раздел уже открыт ниже в переписке.")
     panel = MentorPanel(query.message, state, saved_card=saved.get("mentor_panel", {}),
         cards=saved.get("mentor_cards", []), action=query.data.removeprefix("mentor:"))
     try:
@@ -307,6 +340,8 @@ async def mentor_action(query:CallbackQuery,state:FSMContext,professor_bot=None,
 async def perform_action(query,state,message,professor_bot=None,professor_client=None,expert_client=None):
     uid=query.from_user.id;action=query.data.removeprefix("mentor:")
     await query.answer()
+    if action.split(":", 1)[0] not in {"food_lookup", "estimate_record", "estimate_cancel"}:
+        await state.update_data(mentor_food_lookup=False)
     from . import mentor_onboarding as setup
     if action.startswith("setup:"):
         try:
@@ -336,7 +371,7 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
         return await message.answer(user_texts.greetings.replace('full_name', query.from_user.full_name),reply_markup=user_keyboards.main_menu)
     if action in {"open","menu","start"}:
         await api("/workspace/workout/discard-empty", {"telegram_user_id": uid})
-        return await enter(message,uid,state,onboarding=action!="menu")
+        return await enter(message,uid,state,onboarding=action!="menu" or not mentor_enabled(uid))
     if not mentor_enabled(uid):
         return await message.answer("Откройте наставника, чтобы продолжить.",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[button("🌿 Наставник ElixirPeptide","open")]]))
     await state.set_state(None);clear_opening_question(uid,opening_question(uid))

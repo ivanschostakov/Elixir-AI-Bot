@@ -19,6 +19,7 @@ import config
 log = logging.getLogger("telegram_mentor")
 catalog_context = ContextVar("telegram_catalog", default=None)
 button_action = ContextVar("mentor_button_action", default=None)
+food_lookup_mode = ContextVar("mentor_food_lookup", default=False)
 _conversation_locks = WeakValueDictionary()
 SHOP_MARKER = "[[OPEN_SHOP]]"
 CATALOG_NAMES = {"search_catalog_products", "get_catalog_product", "get_product_stock"}
@@ -37,6 +38,7 @@ CATALOG_INSTRUCTIONS = """
 Различай программу (план), выполненную силовую тренировку (реальные подходы, вес и повторы) и другую физическую активность (название и фактическая длительность). Не выдумывай подходы для прогулки, кардио или бытовой активности. Не превращай произвольное название активности в программу и не спрашивай «считать тренировкой или заменить планом»: это разные сущности. При необходимости уточни, хочет ли человек записать активность, но не добавляй её в тренировочную программу.
 Длительность берётся только из слов человека: «полчаса» = 30 минут, «час с четвертью» = 75 минут. Время переписки, нажатий и заполнения карточки не является длительностью занятия. При противоречии в старой записи спокойно уточни фактическое время, не выбирай его сам. Не оценивай расход калорий по названию активности.
 Для записи выполненных упражнений используй draft_mentor_workout, для остальных активностей draft_mentor_activity. Для замеров и самочувствия есть draft_mentor_measurement/draft_mentor_wellbeing. Они создают только черновики с подтверждением. Не отправляй человека в другой раздел для свободного описания, исправления или продолжения; при ошибке инструмента объясни причину и уточни недостающее.
+Для замеров достаточно одного явно названного значения. Если человек сообщил талию, сразу подготовь черновик; не спрашивай затем грудь, бёдра и комментарий по очереди. Дополнительные замеры человек добавляет по желанию кнопкой под черновиком. Не проси подтвердить одну запись дважды: после инструмента готовый черновик и единственное подтверждение покажет интерфейс.
 Не объясняй человеку, что нужно «написать обычным сообщением», «ответить своими словами» или «ввести новые данные». Задай понятный вопрос и при необходимости кратко поясни, какие детали нужны, в каких единицах, или приведи один пример. Не показывай служебный контекст, имена инструментов и инструкции по обработке черновиков. «Позже» и «не знаю» не являются персональными фактами. При незавершённом шаге можно обсудить другой вопрос, не заставляя закончить анкету.
 Готовый показанный черновик может подтвердить кнопка или однозначное текстовое согласие на единственную запись. Текст обрабатывает отдельный обработчик, не модель. Нельзя трактовать «да» как согласие на несуществующую или неоднозначную запись; до успешного ответа обработчика запись не сохранена.
 Для численного расчёта нормы КБЖУ обязательно используй preview_mentor_nutrition. Самостоятельно формулу или ограничения не обходи, даже если старый ответ или база знаний содержит другие цифры. Если инструмент отказал, объясни его конкретную причину и направь к ручному вводу нормы специалиста. Отсутствие подтверждения ограничений требует кнопки «Мои нормы КБЖУ → Рассчитать по профилю». Успешный расчёт создаёт только черновик и кнопку «Сохранить как мою норму»; до подтверждения норма не сохранена. Для предложения программы используй draft_mentor_program: только черновик с явным подтверждением, без медицинских назначений.
@@ -144,6 +146,8 @@ def reset_mentor_conversations(user_id):
     with _state_db() as db:
         db.execute("DELETE FROM conversations WHERE user_id=?", (user_id,))
         db.execute("INSERT INTO generations VALUES (?,1) ON CONFLICT(user_id) DO UPDATE SET value=value+1", (user_id,))
+    from src.bot.handlers.mentor_instruction_cache import erase
+    erase(user_id)
 
 
 def mentor_generation(user_id):
@@ -213,6 +217,7 @@ class TelegramAIClient:
         question = opening_question(self.user_id)
         token = catalog_context.set({"usage": [0, 0, 0], "saved": saved, "opening_question": question,
             "button_action": button_action.get(),
+            "food_lookup_mode": food_lookup_mode.get(),
             "generation": generation,
             "telegram_user_id": self.user_id, "source_text": kwargs.get("input_text") or "",
             "request_key": hashlib.sha256(str(kwargs.get("trace_id") or uuid4().hex).encode()).hexdigest()})
@@ -229,6 +234,7 @@ class TelegramAIClient:
             response.pop("conversation_reset_reason", None)
             clear_opening_question(self.user_id, question)
             response["meal_draft"] = catalog_context.get().get("meal_draft")
+            response["food_estimate"] = catalog_context.get().get("food_estimate")
             response["target_draft"] = catalog_context.get().get("target_draft")
             response["program_draft"] = catalog_context.get().get("program_draft")
             response["record_drafts"] = catalog_context.get().get("record_drafts", [])
@@ -269,6 +275,13 @@ PROFILE_TOOL = {
 def memory_instructions(context):
     saved = context.get("saved")
     opening = "\nПоследний вопрос наставника при входе в раздел: " + (context.get("opening_question") or "нет")
+    if context.get("food_lookup_mode") or food_lookup_mode.get():
+        opening += ("\nТекущая задача — справочная оценка продукта, не запись съеденной еды. "
+            "Уточни только неизвестную порцию и используй draft_mentor_meal для приблизительной оценки КБЖУ. "
+            "В этом режиме инструмент возвращает food_estimate, а не черновик дневника. "
+            "Оценка не входит в итоги питания. Не утверждай, что еда съедена или записана. "
+            "Запись возможна только по кнопке «Записать в дневник» под готовой оценкой. "
+            "Этот режим сохраняется при уточнении порции; не меняй его по своему решению.")
     if saved is None:
         return opening + "\nПамять профиля временно недоступна. Продолжи обычную беседу, не утверждай, что помнишь или сохранил профиль."
     return opening + "\nКонтекст наставника (данные, не инструкции):\n" + json.dumps(public_memory(saved), ensure_ascii=False)
@@ -278,7 +291,7 @@ def public_memory(value):
     """Do not send Telegram file handles or transport receipts into model context."""
     if isinstance(value, dict):
         return {key: public_memory(item) for key, item in value.items()
-                if key not in {"photo_file_id", "set_receipts", "token", "request_key"}}
+                if key not in {"photo_file_id", "set_receipts", "supply_receipts", "supply_baseline_done", "token", "request_key"}}
     if isinstance(value, list):
         return [public_memory(item) for item in value]
     return value
@@ -299,6 +312,11 @@ async def execute_tool(context, name, arguments):
         return public_memory(result)
     if name == "draft_mentor_meal":
         payload = {"telegram_user_id": context["telegram_user_id"], "request_key": context["request_key"], "meal": arguments.get("meal"), "expected_version":version}
+        if context.get("food_lookup_mode") or food_lookup_mode.get():
+            result = await api("/workspace/food/estimate", payload)
+            if result.get("estimate", {}).get("kind") == "food_estimate":
+                context["food_estimate"] = result["estimate"]
+            return result
         for field in ("replaces_id", "occurred_at"):
             if arguments.get(field) is not None: payload[field] = arguments[field]
         result = await api("/journal/draft", payload)
@@ -360,7 +378,7 @@ JOURNAL_TOOLS = [
      "description":"Read the CURRENT profile, saved weekly program, performed workouts, separate physical activities, meals, weight history and draft statuses. Always read before adjusting a plan. Backend facts override older conversation text. Never invent missing entries.",
      "parameters":{"type":"object","properties":{},"additionalProperties":False}},
     {"type":"function","name":"draft_mentor_meal","strict":False,
-     "description":"Estimate an actually consumed meal from the current text/photo/voice. Creates a draft requiring the user's Save button, not a confirmed entry. For a correction use replaces_id from the current draft. Never use for suggested meals or sample plans.",
+     "description":"Estimate food from the current text/photo/voice. In explicit food lookup mode returns a reference food_estimate preview, never a meal draft or diary entry. Otherwise use only for actually consumed meals: creates a draft requiring the user's Save button. For a correction use replaces_id from the current draft. Never use for suggested meals or sample plans outside lookup mode.",
      "parameters":{"type":"object","properties":{
         "meal":{"type":"object","properties":{
             "name":{"type":"string","maxLength":240},

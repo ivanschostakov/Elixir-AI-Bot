@@ -269,7 +269,7 @@ def test_opening_course_and_leaving_mentor_do_not_start_a_scheme(monkeypatch):
     call=AsyncMock(return_value=dashboard())
     monkeypatch.setattr(f,"api",call)
     msg=dispatch("course")
-    assert "ещё не сохранена" in msg.answer.await_args.args[0]
+    assert "Схема курса пока не добавлена" in msg.answer.await_args.args[0]
     assert call.await_count == 1
     monkeypatch.setattr(mentor,"api",call)
     msg=message()

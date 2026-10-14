@@ -55,10 +55,10 @@ def navigation_mode(message, saved, *, action=None):
     latest = latest_message(saved, message.chat.id)
     if latest.get("message_id", 0) > message.message_id:
         active = saved.get("mentor_panel", {})
-        if (active.get("chat_id") == message.chat.id
-            and active.get("message_id") == latest["message_id"]
-            and active.get("kind", "navigation") in {"navigation", "form"}):
-            return "ignore"
+        if (active.get("message_id") == latest["message_id"]
+            and active.get("source_message_id") == message.message_id
+            and active.get("action") == action):
+            return "already_open"
         return "send"
     if own is not None:
         return "edit" if own.get("kind", "navigation") in {"navigation", "form"} else "send"
@@ -142,11 +142,15 @@ class MentorPanel:
         self.kind = "navigation"
         self.root = action in {"open", "menu", "start", "leave"}
         self.completed = False
+        self.started_with = max((c.get("message_id", 0) for c in [saved_card or {}, *cards]), default=0)
 
     def __getattr__(self, key):
         return getattr(self.message, key)
 
     async def answer(self, text, reply_markup=None, **kwargs):
+        if not self.blocks and not self.started_with:
+            saved = await self.state.get_data()
+            self.started_with = latest_message(saved, self.message.chat.id).get("message_id", 0)
         self.blocks.append((str(text), reply_markup))
         return self.message
 
@@ -204,7 +208,12 @@ class MentorPanel:
         saved.setdefault("mentor_panel", self.saved_card or {})
         saved["mentor_cards"] = [*saved.get("mentor_cards", []), *self.cards]
         mode = navigation_mode(self.message, saved, action=self.action)
-        if mode == "ignore":
+        active = saved.get("mentor_panel", {})
+        if (active.get("message_id", 0) > max(self.started_with, self.message.message_id)
+            and active.get("source_message_id") != self.message.message_id):
+            self.blocks.clear()
+            return
+        if mode == "already_open":
             self.blocks.clear()
             return
         self.target = self.message
@@ -225,7 +234,8 @@ class MentorPanel:
             if not missing_card(error):
                 raise
             self.target = await show_page(self.message, pages, token, 0, root=self.root, send=True)
-        await remember_card(self.state, self.target, kind=self.kind, token=token, pages=pages, root=self.root)
+        await remember_card(self.state, self.target, kind=self.kind, token=token, pages=pages, root=self.root,
+            action=self.action, source_message_id=self.message.message_id)
         self.blocks.clear()
 
 
@@ -337,7 +347,15 @@ async def navigate_page(query, state):
     stale = (latest_message(data, query.message.chat.id).get("message_id", 0) > query.message.message_id
         and saved.get("kind") != "receipt")
     if not saved or stale:
-        await query.answer("Откройте меню заново: эта страница устарела.")
+        await query.answer("Эта страница устарела. Открываю меню наставника.")
+        from .mentor import enter
+        from .mentor_onboarding import pause
+        from src.ai.telegram_mentor import mentor_enabled
+        pause(query.from_user.id)
+        panel = MentorPanel(query.message, state, saved_card=data.get("mentor_panel", {}),
+            cards=data.get("mentor_cards", []), action="menu")
+        await enter(panel, query.from_user.id, state, onboarding=not mentor_enabled(query.from_user.id))
+        await panel.flush()
         return
     index = int(parts[3]) if parts[3].isdigit() else -1
     if not 0 <= index < len(saved.get("pages", [])):

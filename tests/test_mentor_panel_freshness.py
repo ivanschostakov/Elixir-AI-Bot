@@ -7,7 +7,7 @@ from src.bot.handlers.mentor_panel import (
     MentorPanel, clear_input, complete_card, navigate_page, navigation_mode,
     remember_card, remember_message,
 )
-from test_mentor_navigation import actions, message, query
+from test_mentor_navigation import actions, message, query, apis
 from test_telegram_flows import State
 
 
@@ -56,19 +56,22 @@ def test_old_menu_after_conversation_opens_one_new_card_below_it(kind, photo):
 def test_only_latest_service_card_is_editable(kind):
     async def run():
         old, current = message(mid=4), message(mid=20)
+        old.sent = message(mid=21)
+        old.answer.side_effect = None
+        old.answer.return_value = old.sent
         state = State()
         await remember_card(state, old, kind=kind)
         await remember_card(state, current, kind=kind)
         before = dict(state.values)
-        assert navigation_mode(old, state.values, action="food") == "ignore"
+        assert navigation_mode(old, state.values, action="food") == "send"
         panel = MentorPanel(old, state, target=current, action="food")
-        await panel.answer("Must not be delivered")
+        await panel.answer("Fresh food screen")
         await panel.flush()
         old.edit_text.assert_not_awaited()
-        old.answer.assert_not_awaited()
+        old.answer.assert_awaited_once()
         current.edit_text.assert_not_awaited()
         current.answer.assert_not_awaited()
-        assert state.values == before
+        assert state.values["mentor_panel"]["message_id"] == old.sent.message_id
     asyncio.run(run())
 
 
@@ -116,7 +119,11 @@ def test_other_chat_watermark_does_not_make_current_card_stale():
 
 
 @pytest.mark.parametrize("kind", ["user", "answer"])
-def test_page_callback_after_later_message_does_not_edit_history(kind):
+def test_page_callback_after_later_message_does_not_edit_history(kind, monkeypatch):
+    apis(monkeypatch)
+    monkeypatch.setattr(mentor, "configured", lambda: True)
+    from src.ai.telegram_mentor import set_mentor_enabled
+    set_mentor_enabled(123, True)
     async def run():
         msg, state = message(mid=4), State()
         await remember_card(state, msg, kind="navigation", token="page-token",
@@ -126,7 +133,7 @@ def test_page_callback_after_later_message_does_not_edit_history(kind):
         await navigate_page(callback, state)
         callback.answer.assert_awaited_once()
         msg.edit_text.assert_not_awaited()
-        msg.answer.assert_not_awaited()
+        msg.answer.assert_awaited_once()
     asyncio.run(run())
 
 

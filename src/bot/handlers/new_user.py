@@ -1,4 +1,4 @@
-from src.ai.telegram_mentor import wrap_client, mentor_enabled, reset_mentor_conversations, BridgeError
+from src.ai.telegram_mentor import wrap_client, mentor_enabled, reset_mentor_conversations, BridgeError, food_lookup_mode
 import base64
 import asyncio
 import httpx
@@ -614,7 +614,11 @@ async def _handle_media_group(messages: list[Message], state: FSMContext, profes
     if not user.tg_phone and (last_used == LAST_USED_PROFESSOR or used_requests >= UNVERIFIED_REQUEST_LIMIT): return await _request_phone(message, state, mentor_input=messages)
     if last_used == LAST_USED_PROFESSOR and not _can_use_professor_mode(user): return await message.answer(user_texts.premium_limit_0, reply_markup=user_keyboards.only_free)
 
-    response = await safe_ai_response(message, send_message_v2_from_media_group(messages=messages, professor_client=active_client, user_id=user_id, conversation_id=user.conversation_id))
+    food_token = food_lookup_mode.set(bool((await state.get_data()).get("mentor_food_lookup")))
+    try:
+        response = await safe_ai_response(message, send_message_v2_from_media_group(messages=messages, professor_client=active_client, user_id=user_id, conversation_id=user.conversation_id))
+    finally:
+        food_lookup_mode.reset(food_token)
     if response is None: return None
     await consume_mentor_phone_input(messages, state)
     schedule_webapp_call(
@@ -643,7 +647,7 @@ async def _handle_media_group(messages: list[Message], state: FSMContext, profes
 
 @professor_user_router.message(lambda message: not message.media_group_id and ((message.text and message.text.strip()) or (message.caption and message.caption.strip()) or message.photo or message.video or message.video_note or message.document or message.voice))
 @with_action()
-async def handle_single_ai_message(message: Message, state: FSMContext, professor_bot, professor_client, expert_client=None, *, mentor_followup=False):
+async def handle_single_ai_message(message: Message, state: FSMContext, professor_bot, professor_client, expert_client=None, *, mentor_followup=False, callback_error_owner=False, cached_response=None, response_sink=None):
     user_id = message.from_user.id
     if mentor_enabled(user_id) and not mentor_followup:
         from .mentor_flows import pending_text
@@ -670,8 +674,19 @@ async def handle_single_ai_message(message: Message, state: FSMContext, professo
     if not user.tg_phone and (last_used == LAST_USED_PROFESSOR or used_requests >= UNVERIFIED_REQUEST_LIMIT): return await _request_phone(message, state, mentor_input=[message])
     if last_used == LAST_USED_PROFESSOR and not _can_use_professor_mode(user): return await message.answer(user_texts.premium_limit_0, reply_markup=user_keyboards.only_free)
 
-    response = await safe_ai_response(message, send_message_v2_from_telegram(message=message, professor_client=active_client, user_id=user_id, conversation_id=user.conversation_id))
+    if cached_response is not None and cached_response.get("instruction_mode") == last_used:
+        response = {**cached_response, "input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
+        using_cache = True
+    else:
+        using_cache = False
+        food_token = food_lookup_mode.set(bool((await state.get_data()).get("mentor_food_lookup")))
+        try:
+            response = await safe_ai_response(message, send_message_v2_from_telegram(message=message, professor_client=active_client, user_id=user_id, conversation_id=user.conversation_id), notify_errors=not callback_error_owner)
+        finally:
+            food_lookup_mode.reset(food_token)
     if response is None: return None
+    if response_sink is not None and not using_cache:
+        response_sink(response, last_used)
     await consume_mentor_phone_input([message], state)
     if response.get("mentor"):
         from .mentor_flows import remember_response
@@ -689,7 +704,7 @@ async def handle_single_ai_message(message: Message, state: FSMContext, professo
         ),
         operation="write_usage",
     )
-    if last_used == LAST_USED_PROFESSOR and _should_spend_premium_request(user):
+    if not using_cache and last_used == LAST_USED_PROFESSOR and _should_spend_premium_request(user):
         next_requests = max(int(getattr(user, "premium_requests", 0) or 0) - 1, 0)
         schedule_webapp_call(safe_webapp_call(webapp_client.update_user(message.from_user.id, {"premium_requests": next_requests}), operation="decrement_premium_requests"),operation="decrement_premium_requests")
 

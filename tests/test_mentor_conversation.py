@@ -64,7 +64,7 @@ def test_partial_course_answers_keep_the_same_form_and_do_not_save(monkeypatch, 
         assert state.values["form_kind"] == "course_schedule"
         assert state.values["form_token"] == "same-step"
         assert state.values["course_data"] == {"name": "Моя схема"}
-        assert msg.answer.await_args.args[0] == "Когда заканчивается курс по вашей схеме?"
+        assert msg.answer.await_args.args[0].startswith("Когда заканчивается курс по вашей схеме?")
         writes.assert_not_awaited()
     asyncio.run(run())
 

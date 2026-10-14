@@ -72,6 +72,10 @@ class Supply(Data):
     supply_amount: float | None = Field(default=None, ge=0, le=1000000)
     amount_per_intake: float | None = Field(default=None, gt=0, le=1000000)
     supply_unit: str | None = Field(default=None, max_length=40)
+    package_count: float | None = Field(default=None, ge=0, le=1000000)
+    package_amount: float | None = Field(default=None, gt=0, le=1000000)
+    package_unit: str | None = Field(default=None, max_length=40)
+    intake_unit: str | None = Field(default=None, max_length=40)
 
 
 class Reminder(Data):
@@ -109,6 +113,7 @@ class GuidedReps(WorkoutSet):
 class Course(Schedule, Supply):
     name: str | None = Field(default=None, max_length=120)
     dose_text: str | None = Field(default=None, max_length=240)
+    source: Literal["user", "specialist"] | None = None
 
 
 class Note(Data):
@@ -175,6 +180,13 @@ def family(kind):
 def merge_known(kind, known, data):
     merged = {**known, **{k: v for k, v in data.items() if v is not None}}
     if kind in {"course", "course_dose", "course_schedule", "course_supply", "course_record"}:
+        if data.get("package_count") is not None:
+            merged["supply_amount"] = None
+            merged["supply_unit"] = None
+        elif data.get("supply_amount") is not None and data.get("package_count") is None:
+            for key in ("package_count", "package_amount", "package_unit"):
+                merged[key] = None
+    if kind in {"course", "course_dose", "course_schedule", "course_supply", "course_record"}:
         if data.get("interval_days") is not None and data.get("weekdays") is None:
             merged["weekdays"] = None
         elif data.get("weekdays") is not None and data.get("interval_days") is None:
@@ -217,6 +229,8 @@ known содержит уже собранные данные этой запи�
 В program_name/program_sets/program_reps извлекай name, sets, reps и явно названный weekday даже если спросили одну деталь. value — ответ на текущее числовое поле. В set_name/set_weight/set_reps извлекай exercise, weight_kg, reps. Остальные известные поля бери из known.
 На текущем шаге уточняй только его обязательное поле: следующие вопросы задаст бот. Не требуй повторить все данные. Для редактирования known — исходная запись: меняй только явно исправленное и возвращай объединённый результат.
 course/course_dose/course_schedule/course_supply разделяют known: сохраняй явно названные name, dose_text, расписание и запас. dose_text — дословный фрагмент пользовательской схемы, не назначение и не расчёт. Не угадывай единицы или дозы.
+Если человек прямо сказал «назначил врач/специалист», source=specialist; «моя существующая схема» — source=user. Не выбирай источник самостоятельно. Уже явно названный источник не переспрашивай.
+Для запаса отдельно извлекай упаковку и содержимое: «1 флакон 10 мг» = package_count=1, package_amount=10, package_unit=мг, supply_amount=null. «2 мг на приём» = amount_per_intake=2, intake_unit=мг. Не записывай «флакон 10 мг» в supply_unit и не называй расход 2 мг двумя флаконами. Сам ничего не умножай и не пересчитывай: арифметику выполняет сервер. Явно названный расход из known.dose_text можно извлечь, но нельзя назначить или изменить. Если содержимое упаковки или расход не названы, уточни только недостающее.
 Дни недели и интервал — взаимоисключающие режимы расписания: если человек явно меняет режим на интервал, верни weekdays=null; если на дни недели — interval_days=null. Не сохраняй одновременно старый режим и новый.
 wellbeing_note — только фактически сказанное самочувствие, не твои советы. custom_goal — сформулированная человеком цель, не встречный вопрос.
 В workout_duration значение value ВСЕГДА в минутах: полтора часа = 90, час = 60, полчаса = 30.
@@ -292,6 +306,17 @@ def canonical(kind, data, skip, context):
         days = "интервал="+str(interval) if interval else ",".join(str(d+1) for d in weekdays)
         return " | ".join((start, end, days, ",".join(clock(c) for c in times)))
     if kind == "course_supply":
+        if data.get("package_count") is not None or data.get("intake_unit") is not None:
+            if data.get("package_count") is not None:
+                required(data, "package_amount")
+                required(data, "package_unit")
+            else:
+                required(data, "supply_amount")
+                required(data, "supply_unit")
+            required(data, "amount_per_intake")
+            if not (data.get("intake_unit") or data.get("supply_unit")):
+                raise ValueError()
+            return json.dumps({k: v for k, v in data.items() if k in Supply.model_fields and v is not None}, ensure_ascii=False)
         return " | ".join((str(required(data, "supply_amount")), str(required(data, "amount_per_intake")), safe_name(required(data, "supply_unit"))))
     if kind in {"reminder", "course_reminder"}:
         if context.get("reminder_kind") == "inactivity": return str(required(data, "days"))
@@ -356,9 +381,15 @@ def followup(kind, data, context):
             if not data.get(key): return question
         return "В какие дни или с каким интервалом запланированы приёмы по вашей схеме? Например, по понедельникам и четвергам или раз в три дня. Переносим ваше существующее расписание."
     if kind == "course_supply":
+        if data.get("package_count") is not None and (data.get("package_amount") is None or not data.get("package_unit")):
+            return "Сколько средства содержится в одном флаконе или упаковке? Например, 10 мг во флаконе. Это нужно только для подсчёта запаса."
         for key, question in (("supply_amount", QUESTIONS["course_supply"]),
             ("amount_per_intake", "Сколько из этого запаса уходит на один приём по вашей схеме? Нужен расход в тех же единицах, что и запас; дозировку не пересчитываем."),
             ("supply_unit", "В чём считаем запас — в таблетках, миллилитрах или другой единице?")):
+            if key == "supply_amount" and data.get("package_count") is not None:
+                continue
+            if key == "supply_unit" and data.get("intake_unit"):
+                continue
             if data.get(key) is None: return question
     return QUESTIONS.get(kind, "Расскажите чуть подробнее, пожалуйста.")
 
@@ -444,11 +475,16 @@ async def parse_step(message, state, kind, client):
         converted = canonical(kind, data, result.skip, context)
     except (ValueError, KeyError):
         converted = None
-        question = question or followup(kind, data, context)
+        question = followup(kind, data, context) if kind in {"course_schedule", "course_supply"} else question or followup(kind, data, context)
+    else:
+        if kind in {"course_schedule", "course_supply"}:
+            question = None  # Complete values are shown in the mandatory review, not re-asked.
     if question:
         question = human_question(kind, data, context, question)
         await state.update_data(form_answers=answers, form_question=question)
-        await message.answer(question, parse_mode=None)
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        await message.answer(question, parse_mode=None, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Отмена", callback_data="mentor:menu")]]))
         return None
     await state.update_data(form_answers=answers, form_profile_version=saved.get("version"))
     return converted

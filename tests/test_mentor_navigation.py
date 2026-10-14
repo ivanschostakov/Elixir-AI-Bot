@@ -327,14 +327,18 @@ def test_navigation_inside_the_new_menu_edits_only_that_new_menu(monkeypatch):
 def test_clicking_an_older_menu_never_edits_the_newer_menu(monkeypatch):
     apis(monkeypatch)
     msg = message(mid=4, markup=mentor.menu())
+    msg.sent = message(mid=21)
+    msg.answer.side_effect = None
+    msg.answer.return_value = msg.sent
     state = State(mentor_panel={"message_id":20, "chat_id":123, "kind":"navigation"},
         mentor_cards=[{"message_id":4, "chat_id":123, "kind":"navigation"},
             {"message_id":20, "chat_id":123, "kind":"navigation"}])
     asyncio.run(mentor.mentor_action(query("food", msg), state))
     msg.edit_text.assert_not_awaited()
-    msg.answer.assert_not_awaited()
+    msg.answer.assert_awaited_once()
     msg.bot.edit_message_text.assert_not_awaited()
-    assert state.values["mentor_panel"]["message_id"] == 20
+    assert state.values["mentor_panel"]["message_id"] == msg.sent.message_id
+    assert "Питание" in msg.answer.await_args.args[0]
 
 
 def test_form_answer_retires_old_question_buttons_but_does_not_edit_its_text():
