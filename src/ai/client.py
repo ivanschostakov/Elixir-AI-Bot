@@ -1,5 +1,5 @@
 import json
-from src.ai.telegram_mentor import catalog_context, CATALOG_TOOLS, CATALOG_NAMES, CATALOG_INSTRUCTIONS, PROFILE_TOOL, JOURNAL_TOOLS, memory_instructions, execute_tool, BridgeError
+from src.ai.telegram_mentor import catalog_context, CATALOG_TOOLS, CATALOG_NAMES, CATALOG_INSTRUCTIONS, NUTRITION_INSTRUCTIONS, PROFILE_TOOL, JOURNAL_TOOLS, memory_instructions, execute_tool, BridgeError
 import base64
 import io
 import logging
@@ -318,7 +318,23 @@ class ProfessorClient(AsyncClient):
         if context is not None and context.get("saved") is not None:
             tools = [*tools, PROFILE_TOOL, *JOURNAL_TOOLS]
         instructions = self.instructions + (CATALOG_INSTRUCTIONS + memory_instructions(context) if context is not None else "")
-        response = await self.responses.create(model=self.__model, input=input_payload, instructions=instructions, conversation=ResponseConversationParamParam(id=conversation_id), tools=tools, include=response_include, reasoning=self._build_reasoning_payload(), truncation="auto")
+        reasoning = self._build_reasoning_payload()
+        nutrition_task = context is not None and (context.get("food_lookup_mode") or
+            context.get("button_action") in {"suggest", "analyze_day"})
+        if nutrition_task:
+            # Ordinary meal questions need the fresh diary, not peptide retrieval or rendering tools.
+            tools = [tool for tool in JOURNAL_TOOLS if tool["name"] == "draft_mentor_meal"] if context.get("food_lookup_mode") and context.get("saved") is not None else []
+            saved = context.get("saved")
+            if saved is not None:
+                saved = {key: saved[key] for key in ("profile", "date", "now", "meals", "totals", "weights") if key in saved}
+                workspace = context["saved"].get("workspace", {})
+                saved["workspace"] = {key: workspace[key] for key in ("target", "remaining", "today_workouts",
+                    "today_activities", "today_wellbeing") if key in workspace}
+            instructions = NUTRITION_INSTRUCTIONS + memory_instructions({**context, "saved": saved})
+            reasoning = {"effort": "low"}
+            response_include = None
+        allowed_functions = {tool["name"] for tool in tools if isinstance(tool, dict) and tool.get("type") == "function"}
+        response = await self.responses.create(model=self.__model, input=input_payload, instructions=instructions, conversation=ResponseConversationParamParam(id=conversation_id), tools=tools, include=response_include, reasoning=reasoning, truncation="auto")
         if context is not None:
             for round_index in range(6):
                 calls = [item for item in response.output if getattr(item, "type", None) == "function_call"]
@@ -329,6 +345,8 @@ class ProfessorClient(AsyncClient):
                 outputs = []
                 for call in calls:
                     try:
+                        if call.name not in allowed_functions:
+                            raise ValueError("Tool is not available for this task")
                         result = await execute_tool(context, call.name, json.loads(call.arguments))
                     except (ValueError, TypeError, BridgeError):
                         result = {"ok": False, "error": "tool_failed", "message": "Действие не выполнено. Не утверждай, что профиль сохранён или каталог проверен. При неясных данных уточни один вопрос."}
@@ -336,7 +354,7 @@ class ProfessorClient(AsyncClient):
                 response = await self.responses.create(model=self.__model, input=outputs, instructions=instructions,
                     conversation=ResponseConversationParamParam(id=conversation_id), tools=tools,
                     tool_choice="none" if round_index == 5 else "auto", include=response_include,
-                    reasoning=self._build_reasoning_payload(), truncation="auto")
+                    reasoning=reasoning, truncation="auto")
         self.__logger.info("AI client step | trace=%s | stage=%s.done | conversation_id=%s | elapsed_ms=%d", trace_id, stage_name, conversation_id, int((time.monotonic() - step_started) * 1000))
         return response
 

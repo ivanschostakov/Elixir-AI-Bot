@@ -21,6 +21,7 @@ def private_store(tmp_path, monkeypatch):
     monkeypatch.setattr(mentor, "configured", lambda: True)
     monkeypatch.setattr(mentor_access, "check_mentor_phone", AsyncMock(return_value=False))
     monkeypatch.setattr(mentor_onboarding, "needs_profile", lambda _: False)
+    mentor_onboarding.save(123, {"status": "complete", "timezone_done": True, "timezone": "UTC"})
 
 
 def bot():

@@ -54,6 +54,40 @@ def test_skipping_recount_does_not_create_another_course(monkeypatch):
     assert 'Остаток не меняю' in msg.answer.await_args.args[0]
 
 
+def test_skipping_stock_drops_partial_inventory_but_keeps_dose_and_schedule(monkeypatch):
+    create = AsyncMock()
+    monkeypatch.setattr(flows, 'make_draft', create)
+    course = {'name': 'Existing scheme', 'dose_text': '2 mg weekly', 'source': 'user',
+        'weekdays': [0], 'times': ['09:00'], 'amount_per_intake': 2, 'intake_unit': 'мг',
+        'package_amount': 10, 'package_unit': 'мг'}
+    state = State(course_data=course, form_kind='course_supply')
+    asyncio.run(flows.receive_value(message(text='-'), state, None, normalized='-'))
+    payload = create.await_args.args[4]
+    assert payload == {key: course[key] for key in ('name', 'dose_text', 'source', 'weekdays', 'times')}
+
+
+@pytest.mark.parametrize('root', ['course_mark', 'course_calendar'])
+def test_full_course_pages_are_loaded_without_recent_calendar_cutoff(monkeypatch, root):
+    saved = dashboard()
+    saved['workspace']['courses'] = [{'id': 7, 'name': 'Saved scheme', 'timezone': 'Asia/Almaty', 'calendar': []}]
+    async def api(path, payload):
+        if path == '/dashboard':
+            return saved
+        assert path == '/workspace/course/events'
+        assert payload == {'telegram_user_id': 123, 'entry_id': 7, 'offset': 10, 'limit': 10,
+            'pending_only': root == 'course_mark'}
+        return {'items': [{'id': 91, 'status': 'pending', 'occurred_at': '2029-11-01T04:00:00Z'}], 'has_more': True}
+    monkeypatch.setattr(flows, 'api', AsyncMock(side_effect=api))
+    msg = message()
+    asyncio.run(flows.dispatch(query(root+':7:10', msg), State(), root+':7:10', None, None, None))
+    text = msg.answer.await_args.args[0]
+    buttons = actions(msg.answer.await_args.kwargs['reply_markup'])
+    assert '11. 1 ноября, 09:00' in text and 'Алматы (UTC+5)' in text
+    assert f'mentor:{root}:7:0' in buttons and f'mentor:{root}:7:20' in buttons
+    if root == 'course_mark':
+        assert 'mentor:course_event:done:91' in buttons and 'mentor:course_event:skipped:91' in buttons
+
+
 def test_new_course_resets_old_recount_state():
     msg, state = message(), State(course_supply_edit=True, course_id=7)
     asyncio.run(flows.start_form(msg, 123, state, 'course'))

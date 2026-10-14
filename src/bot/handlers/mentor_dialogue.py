@@ -9,15 +9,17 @@ TASKS = {
     "workout_free": "Хочу записать занятие вне программы. Спроси, чем я занимался и как долго. Если это силовая тренировка, собери реальные упражнения, подходы, вес и повторения; если другая активность, достаточно её названия и времени. Ничего не придумывай и не записывай до моего ответа и подтверждения.",
     "reason:workout": "Помоги скорректировать мою тренировочную программу. Сначала прочитай мой текущий недельный план, последние фактические тренировки, цель и ограничения. Уточни, что не подходит, только если этого ещё нет в диалоге. Затем предложи конкретное изменение полного плана с сохранением остальных упражнений. Изменённая программа пока только черновик для моего подтверждения.",
     "measurement": "Хочу добавить замеры тела. Спроси, какие замеры я сделал, и поясни, что можно сообщить, например, талию или бёдра в сантиметрах. Не требуй всех замеров и не оценивай их сам. Запись только черновиком через draft_mentor_measurement.",
-    "wellbeing": "Хочу отметить самочувствие. Спроси, как я себя чувствую сегодня. Для дневника нужна моя оценка от 1 до 5, где 1 — плохо, 5 — хорошо; можно добавить рассказ о состоянии. Не назначай оценку по описанию симптомов самостоятельно. Запись только черновиком через draft_mentor_wellbeing.",
 }
 
 
 async def dispatch_dialogue(query, state, action, message, professor_bot, professor_client, expert_client):
     from .mentor import ask, run_ai_action
-    if action in TASKS:
+    if action in TASKS or action == "wellbeing":
         from .mentor_panel import clear_input
         await clear_input(state)
+        if action == "wellbeing":
+            # The button-first form also accepts text and questions through receive.
+            return False
         await run_ai_action(query, state, professor_bot, professor_client, expert_client, TASKS[action])
         return True
     if action == "weight":

@@ -155,8 +155,12 @@ async def enter(message,user_id,state,*,onboarding=True):
         progress = setup.load(user_id)
         if onboarding and progress.get("status") == "active":
             return await setup.resume(message, user_id)
-        if onboarding and setup.needs_profile(saved) and progress.get("status") != "complete":
+        if (onboarding and setup.needs_profile(saved) and progress.get("status") != "complete"
+                and not progress.get("timezone_only")):
             return await setup.offer(message, user_id)
+        if (onboarding and not progress.get("timezone_done") and not progress.get("timezone_only")
+                and (not progress.get("step") or progress.get("status") == "complete")):
+            return await setup.confirm_existing_timezone(message, user_id, saved)
         from .mentor_flows import home_view
         text=home_view(saved)
         question="С чем хотите помочь себе сегодня?" if onboarding else None
@@ -167,8 +171,10 @@ async def enter(message,user_id,state,*,onboarding=True):
         text="Наставник ElixirPeptide\n\nПрофиль сейчас не загрузился. Можно продолжить разговор или попробовать открыть меню позже."
     kb = menu(saved.get("workspace", {}).get("sections"))
     from . import mentor_onboarding as setup
-    if setup.load(user_id).get("status") == "paused" or setup.needs_profile(saved):
-        kb.inline_keyboard.insert(0, [button("Продолжить настройку профиля", "setup_start")])
+    progress = setup.load(user_id)
+    if progress.get("status") == "paused" or setup.needs_profile(saved):
+        label = "Подтвердить часовой пояс" if progress.get("timezone_only") else "Продолжить настройку профиля"
+        kb.inline_keyboard.insert(0, [button(label, "setup_start")])
     await message.answer(text,reply_markup=kb,parse_mode=None)
 
 

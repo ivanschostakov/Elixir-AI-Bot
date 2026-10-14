@@ -62,6 +62,15 @@ def current(uid, token):
     return value.get("status") == "active" and value.get("token") == token and bridge.mentor_enabled(uid)
 
 
+def record_timezone_choice(uid, zone):
+    value = load(uid)
+    if value.pop("timezone_only", False):
+        value.update(status="complete", step=None)
+    elif value.get("step") in {"timezone", "timezone_confirm"}:
+        value.update(status="paused", step=None)
+    save(uid, {**value, "timezone": zone, "timezone_done": True, "token": secrets.token_hex(4)})
+
+
 async def section_access(message, uid, step):
     data = await bridge.api("/dashboard", {"telegram_user_id": uid})
     closed = {item.strip() for item in config.env("TELEGRAM_MENTOR_CLOSED_SECTIONS", "").split(",")}
@@ -103,18 +112,36 @@ async def offer(message, uid):
             [button("Пока открыть меню", "menu")]]))
 
 
+async def confirm_existing_timezone(message, uid, data):
+    value = load(uid)
+    zone = data.get("settings", {}).get("timezone")
+    try:
+        ZoneInfo(zone)
+    except (ZoneInfoNotFoundError, TypeError, ValueError):
+        zone = None
+    save(uid, {**value, "timezone_only": True, "timezone": zone,
+               "step": "timezone_confirm" if zone else "timezone"})
+    await resume(message, uid)
+
+
 async def advance(message, uid, *, data=None):
-    from .mentor_panel import MentorPanel
-    if isinstance(message, MentorPanel):
+    from .mentor_panel import MentorPanel, ReplyCards
+    if isinstance(message, (MentorPanel, ReplyCards)):
         message.kind = "form"
     value = load(uid)
     data = data or await bridge.api("/dashboard", {"telegram_user_id": uid})
     if not current(uid, value.get("token")):
         return
     profile = data.get("profile", {})
-    step = next((key for key in FIELDS if profile.get(key) is None or key == "activity" and profile.get(key) not in ACTIVITY), None)
-    if not step and not value.get("preferences_done") and not profile.get("preferences"):
-        step = "preferences"
+    if value.get("timezone_only"):
+        if value.get("timezone_done"):
+            return await finish(message, uid, "Часовой пояс подтверждён: "+timezone_label(value["timezone"])+
+                                ". Профиль и настройки напоминаний сохранены.")
+        step = "timezone"
+    else:
+        step = next((key for key in FIELDS if profile.get(key) is None or key == "activity" and profile.get(key) not in ACTIVITY), None)
+        if not step and not value.get("preferences_done") and not profile.get("preferences"):
+            step = "preferences"
     if not step and not value.get("timezone_done"):
         step = "timezone"
     if not step:
@@ -141,9 +168,16 @@ async def advance(message, uid, *, data=None):
 
 
 async def resume(message, uid):
+    from .mentor_panel import MentorPanel, ReplyCards
+    if isinstance(message, (MentorPanel, ReplyCards)):
+        message.kind = "form"
     value = load(uid)
     value = {**value, "status": "active", "token": secrets.token_hex(4)}
     save(uid, value)
+    if value.get("step") == "timezone_confirm" and not value.get("timezone_done"):
+        if await section_access(message, uid, "timezone_confirm") and current(uid, value["token"]):
+            await repeat_confirmation(message, uid, value)
+        return
     if value.get("step") == "target" and value.get("draft_id"):
         if not await section_access(message, uid, "target"):
             return
@@ -165,6 +199,9 @@ async def repeat_confirmation(message, uid, value):
     elif step == "timezone_confirm":
         clock = datetime.now(ZoneInfo(value["timezone"])).strftime("%H:%M, %d.%m")
         text = f"Ваш часовой пояс: {timezone_label(value['timezone'])}. Сейчас там {clock}. Всё верно?"
+        if value.get("timezone_only"):
+            text = "Уточним местное время для дневника и напоминаний. Профиль заново заполнять не нужно.\n\n"+text
+        text += "\nНапоминания сами не включатся."
         choices = [("Да, верно", "confirm_timezone"), ("Указать другой город", "change_timezone")]
     else:
         result = await bridge.api("/workspace/record", {"telegram_user_id": uid, "entry_id": value["draft_id"]})
@@ -180,11 +217,15 @@ async def repeat_confirmation(message, uid, value):
 
 async def finish(message, uid, text):
     from .mentor import button
-    from .mentor_panel import MentorPanel
-    if isinstance(message, MentorPanel):
+    from .mentor_panel import MentorPanel, ReplyCards
+    if isinstance(message, (MentorPanel, ReplyCards)):
         message.kind = "navigation"
-    save(uid, {**load(uid), "status": "complete", "step": None, "token": secrets.token_hex(4)})
-    await message.answer(text+"\n\nС чего начнём? Можно записать первый приём пищи или задать вопрос о питании и привычках. Тренировки, курс и прогресс доступны в меню.",
+    value = load(uid)
+    timezone_only = value.pop("timezone_only", False)
+    save(uid, {**value, "status": "complete", "step": None, "token": secrets.token_hex(4)})
+    next_step = ("Можно продолжить дневник или задать вопрос наставнику. Остальные разделы доступны в меню."
+                 if timezone_only else "С чего начнём? Можно записать первый приём пищи или задать вопрос о питании и привычках. Тренировки, курс и прогресс доступны в меню.")
+    await message.answer(text+"\n\n"+next_step,
                          parse_mode=None, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                              [button("Добавить еду", "meal")], [button("Спросить наставника", "question")],
                              [button("Меню наставника", "menu")]]))
@@ -281,8 +322,9 @@ async def callback(query, state, message):
             data = await bridge.api("/dashboard", {"telegram_user_id": uid})
             if not current(uid, value["token"]):
                 return True
-            await bridge.api("/reminder/options", {"telegram_user_id": uid,
-                **reminder_payload(data["settings"]), "timezone": value["timezone"]})
+            if data["settings"].get("timezone") != value["timezone"]:
+                await bridge.api("/reminder/options", {"telegram_user_id": uid,
+                    **reminder_payload(data["settings"]), "timezone": value["timezone"]})
             if not current(uid, value["token"]):
                 return True
             save(uid, {**value, "timezone_done": True})
@@ -413,11 +455,10 @@ async def _receive(message, state, professor_client=None, professor_bot=None, ex
                 zone = patch.get("timezone")
                 if not zone:
                     return await message.answer(PROMPTS[step], parse_mode=None)
-                clock = datetime.now(ZoneInfo(zone)).strftime("%H:%M, %d.%m")
+                ZoneInfo(zone)
                 value = {**value, "timezone": zone, "step": "timezone_confirm", "token": secrets.token_hex(4)}
                 save(uid, value)
-                return await message.answer(f"Ваш часовой пояс: {timezone_label(zone)}. Сейчас там {clock}. Всё верно?",
-                    parse_mode=None, reply_markup=markup(value["token"], [("Да, верно", "confirm_timezone"), ("Указать другой город", "change_timezone")]))
+                return await repeat_confirmation(message, uid, value)
             if result is not None:
                 patch = {k: v for k, v in patch.items() if data.get("profile", {}).get(k) != v}
                 evidence = "\n".join(item["answer"] for item in answers)

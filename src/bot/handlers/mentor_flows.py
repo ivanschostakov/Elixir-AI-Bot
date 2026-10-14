@@ -334,6 +334,9 @@ async def confirm_input_locked(message, uid, state, action):
         saved = await api("/dashboard", {"telegram_user_id": uid})
         await api("/reminder/options", {"telegram_user_id": uid,
             **reminder_payload(saved["settings"]), **pending["payload"]})
+        if kind == "timezone":
+            from .mentor_onboarding import record_timezone_choice
+            record_timezone_choice(uid, pending["payload"]["timezone"])
         await clear_input(state)
         if isinstance(message, MentorPanel):
             await complete_card(message, "Настройка сохранена.", reply_markup=keyboard([("Настройки напоминаний", "reminders")]))
@@ -579,7 +582,7 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
     elif action == "food_lookup":
         from src.ai.telegram_mentor import save_opening_question
         await state.update_data(mentor_food_lookup=True)
-        save_opening_question(uid, "Справочный поиск продукта: дай приблизительную оценку КБЖУ, уточнив порцию при необходимости. Не создавай запись или черновик съеденной еды, пока человек явно не сообщил, что уже съел её.")
+        save_opening_question(uid, "Справочный поиск продукта: уточни порцию, если неизвестна, и подготовь приблизительную оценку через draft_mentor_meal. В этом режиме инструмент создаёт только справочную оценку с кнопкой записи, без изменения дневника, даже если человек ещё не ел продукт.")
         await message.answer("О каком продукте или блюде хотите узнать? Назовите его и, если знаете, размер порции. "
             "Помогу примерно оценить калории, белки, жиры и углеводы; в дневник этот поиск ничего не запишет.",
             reply_markup=keyboard([("Найти среди моих записей", "meal_search")]))
@@ -784,23 +787,37 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
             known.update(amount_per_intake=course.get("amount_per_intake"), intake_unit=course.get("supply_unit"))
         await form(message, state, "course_supply", QUESTIONS["course_supply"], known=known,
             course_data=course, course_supply_edit=True, course_id=course["id"])
-    elif root == "course_mark":
+    elif root in {"course_mark", "course_calendar"}:
         course = next((c for c in w.get("courses", []) if c["id"] == int(action.split(":")[1])), None)
         if not course:
             raise BridgeError("Курс не найден. Откройте актуальное меню.")
-        events = [e for e in course.get("calendar", []) if e["status"] == "pending" and datetime.fromisoformat(e["occurred_at"]) <= datetime.fromisoformat(data["now"])]
-        if not events:
-            await message.answer("Пока нет наступившего приёма, который нужно отметить. Будущие приёмы остаются в календаре.",
-                reply_markup=keyboard([("Календарь курса", f"course_calendar:{course['id']}")]))
-        for event in events:
-            await message.answer(course["name"]+"\n"+local_datetime(event["occurred_at"], course["timezone"])+"\n"+course["dose_text"],
-                reply_markup=keyboard([("✅ Приём выполнен", f"course_event:done:{event['id']}"), ("Пропущен", f"course_event:skipped:{event['id']}")]))
-    elif action == "course" or root == "course_calendar":
+        parts = action.split(":")
+        offset = int(parts[2]) if len(parts) == 3 else 0
+        page = await api("/workspace/course/events", {"telegram_user_id": uid, "entry_id": course["id"],
+            "offset": offset, "limit": 10, "pending_only": root == "course_mark"})
+        lines = ["Отметить приём" if root == "course_mark" else "Календарь курса", course["name"],
+            "Часовой пояс: "+timezone_label(course["timezone"]), ""]
+        rows = []
+        for index, event in enumerate(page["items"], start=offset+1):
+            stamp = local_datetime(event["occurred_at"], course["timezone"])
+            status = {"done": "выполнено", "skipped": "пропущено", "pending": "по расписанию", "cancelled": "отменено"}.get(event["status"], event["status"])
+            lines.append(f"{index}. {stamp} · {status}")
+            if root == "course_mark":
+                rows.append([(f"{index}. Выполнено", f"course_event:done:{event['id']}"),
+                    (f"{index}. Пропущено", f"course_event:skipped:{event['id']}")])
+        if not page["items"]:
+            lines.append("Нет наступивших неотмеченных приёмов." if root == "course_mark" else "На этой странице приёмов нет.")
+        navigation = []
+        if offset:
+            navigation.append(("← Назад", f"{root}:{course['id']}:{max(0, offset-10)}"))
+        if page["has_more"]:
+            navigation.append(("Дальше →", f"{root}:{course['id']}:{offset+10}"))
+        if navigation:
+            rows.append(navigation)
+        rows.append([("Мой курс", "course")])
+        await message.answer("\n".join(lines), parse_mode=None, reply_markup=keyboard(*rows))
+    elif action == "course":
         courses = w.get("courses", [])
-        if root == "course_calendar":
-            courses = [c for c in courses if c["id"] == int(action.split(":")[1])]
-            if not courses:
-                raise BridgeError("Курс не найден. Откройте актуальное меню.")
         if not courses:
             await message.answer("Схема курса пока не добавлена. Можно сохранить назначение специалиста или вашу уже существующую схему; бот не подбирает дозировки.", reply_markup=keyboard([("Добавить существующую схему", "course_new")]))
         for course in courses:
@@ -818,13 +835,15 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
             if course['due']:
                 lines.append(f"Выполнение плана: {course['done']/course['due']*100:.0f}%")
             future=[e for e in course.get("calendar", []) if e["status"]=="pending" and datetime.fromisoformat(e["occurred_at"])>=datetime.fromisoformat(data["now"])]
+            if course.get("next_event"):
+                future = [course["next_event"]]
             if future:
                 clock=datetime.fromisoformat(future[0]["occurred_at"]).astimezone(ZoneInfo(course["timezone"])).strftime("%d.%m в %H:%M")
                 lines.append("Следующий приём по расписанию: "+clock)
             if not data.get("settings", {}).get("reminders", {}).get("course"):
                 lines.append("Напоминания о курсе выключены. Включите их в настройках.")
             elif course.get("reminder_time"):
-                lines.append("Уведомление в дни курса: "+course["reminder_time"]+" · "+course["timezone"])
+                lines.append("Уведомление в дни курса: "+course["reminder_time"]+" · "+timezone_label(course["timezone"]))
             else:
                 lines.append("Уведомления: по времени сохранённой схемы.")
             supply = course.get("supply")
@@ -836,9 +855,6 @@ async def dispatch(query, state, action, professor_bot, professor_client, expert
                 lines.append(supply.get("reason", "Уточните фактический остаток через «Рассчитать остаток»."))
             else:
                 lines.append("Запас не рассчитан: количество и расход в одинаковых единицах не указаны.")
-            for event in (course.get("calendar", [])[:14] if root == "course_calendar" else []):
-                clock = datetime.fromisoformat(event["occurred_at"]).astimezone(ZoneInfo(course["timezone"])).strftime("%d.%m %H:%M")
-                lines.append(f"{clock} · "+{"done": "выполнено", "skipped": "пропущено", "pending": "по расписанию", "cancelled": "отменено"}.get(event["status"], event["status"]))
             kb = keyboard([("📅 Календарь курса", f"course_calendar:{course['id']}")],
                 [("✅ Отметить приём", f"course_mark:{course['id']}")],
                 [("📦 Рассчитать остаток", f"course_supply:{course['id']}")], [("⏰ Изменить время напоминания", f"course_reminder:{course['id']}")],
@@ -1237,7 +1253,7 @@ async def receive_value(message, state, professor_client=None, *, normalized=Non
                 await next_step(message, state, "course_schedule", QUESTIONS["course_schedule"], professor_client, course_data=course)
                 return
             await state.set_state(None)
-            await message.answer("Эту схему назначил специалист?", reply_markup=keyboard([("Назначил специалист", "course_source:specialist"), ("Моя существующая схема", "course_source:user")]))
+            await message.answer("Эту схему назначил специалист?", reply_markup=keyboard([("Назначил специалист", "course_source:specialist"), ("Моя существующая схема", "course_source:user")], [("Отмена", "course")]))
         elif kind == "course_schedule":
             start, end, days, clocks = [p.strip() for p in text.split("|")]
             schedule = {"interval_days": int(days.split("=", 1)[1])} if days.lower().startswith("интервал=") else {"weekdays": [int(d.strip())-1 for d in days.split(",")]}
@@ -1278,6 +1294,10 @@ async def receive_value(message, state, professor_client=None, *, normalized=Non
                         f"Расход по вашей схеме: {fmt(normalized['amount_per_intake'])} {normalized['supply_unit']} на приём. Сохранить фактический остаток?")
                     return
                 course = {**course, **supply}
+            else:
+                inventory_fields = {"supply_amount", "amount_per_intake", "supply_unit", "package_count",
+                    "package_amount", "package_unit", "intake_unit"}
+                course = {key: value for key, value in course.items() if key not in inventory_fields}
             await make_draft(message, uid, state, "course", course)
         elif kind == "workout_set":
             parts = [p.strip() for p in text.split("|")]
