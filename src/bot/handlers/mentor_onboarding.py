@@ -11,20 +11,9 @@ from src.ai import telegram_mentor as bridge
 from src.ai.mentor_input import OnboardingProfile, extract_answer, input_lock
 from src.ai.webapp_client import WebappBotApiError
 from .mentor_format import ACTIVITY, GOALS, timezone_label
+from .mentor_onboarding_ui import FIELDS, LABELS, NUTRITION_FIELDS, PROMPTS, display, question, summary
 import config
 
-FIELDS = ("goal", "age", "sex", "height_cm", "current_weight_kg", "activity")
-PROMPTS = {
-    "goal": "Какого результата вы хотите достичь? Выберите подходящую цель или расскажите, что для вас сейчас важно.",
-    "age": "Сколько вам полных лет? Возраст нужен, чтобы проверить, подходит ли автоматический расчёт нормы питания.",
-    "sex": "Для расчёта нормы питания уточню: вы мужчина или женщина? Можно выбрать кнопку ниже.",
-    "height_cm": "Какой у вас рост в сантиметрах? Например, 170 см.",
-    "current_weight_kg": "Сколько вы сейчас весите? Напишите вес в килограммах, например 78,5. Если давно не взвешивались, можно указать примерно.",
-    "activity": "Насколько активен ваш обычный день? Учитывайте работу, прогулки и тренировки. Выберите самый близкий вариант или расскажите о своём режиме.",
-    "preferences": "Расскажите немного о своём обычном дне и питании: как много двигаетесь, что любите есть и есть ли продукты, которые вам не подходят. Это поможет учитывать ваши привычки. Этот шаг можно пропустить.",
-    "timezone": "В каком городе вы сейчас живёте? Это нужно, чтобы дневник и напоминания совпадали с вашим местным временем. Напоминания сами не включатся.",
-    "eligibility": "Можно рассчитать стартовую норму питания по вашему профилю. Расчёт предназначен для взрослых без беременности, грудного вскармливания, РПП и необходимости лечебного питания. Эти ограничения к вам не относятся? Если сомневаетесь, расчёт пропустим: дневник останется доступен.",
-}
 
 
 def load(uid):
@@ -89,11 +78,13 @@ def needs_profile(data):
     return any(profile.get(k) is None for k in FIELDS) or profile.get("activity") not in ACTIVITY
 
 
-def markup(token, choices=(), *, skippable=False):
+def markup(token, choices=(), *, skippable=False, back=False):
     from .mentor import button
     rows = [[button(label, f"setup:{token}:{value}")] for label, value in choices]
     if skippable:
         rows.append([button("Пропустить этот шаг", f"setup:{token}:skip")])
+    if back:
+        rows.append([button("Назад", f"setup:{token}:back")])
     rows.append([button("Продолжить позже", f"setup:{token}:later")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -105,8 +96,9 @@ async def offer(message, uid):
     save(uid, {**value, "token": token, "status": "paused"})
     await message.answer(
         "Наставник поможет вести питание, следить за активностью и замечать изменения. "
-        "Давайте сначала познакомимся: я задам несколько вопросов по одному, затем предложу ориентир КБЖУ.\n\n"
-        "Ответы сохраняются в вашем профиле. То, что вы уже рассказали, повторять не нужно; настройку можно отложить.",
+        "Знакомство займёт примерно 3–5 минут: я задам вопросы по одному, затем предложу ориентир калорий, белков, жиров и углеводов.\n\n"
+        "Можно отвечать текстом или голосом, а где есть варианты — кнопками. "
+        "Ответы сохраняются: уже известное повторять не нужно. Можно вернуться назад, исправить ответ или продолжить позже.",
         parse_mode=None, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [button("Продолжить знакомство" if value.get("step") else "Начать знакомство", f"setup:{token}:begin")],
             [button("Пока открыть меню", "menu")]]))
@@ -133,6 +125,8 @@ async def advance(message, uid, *, data=None):
     if not current(uid, value.get("token")):
         return
     profile = data.get("profile", {})
+    if value.get("editing"):
+        return await review(message, uid, data=data)
     if value.get("timezone_only"):
         if value.get("timezone_done"):
             return await finish(message, uid, "Часовой пояс подтверждён: "+timezone_label(value["timezone"])+
@@ -145,11 +139,31 @@ async def advance(message, uid, *, data=None):
     if not step and not value.get("timezone_done"):
         step = "timezone"
     if not step:
-        if data.get("workspace", {}).get("target"):
-            return await finish(message, uid, "Ваш профиль готов. Сохранённая норма питания остаётся без изменений.")
-        step = "eligibility"
+        return await review(message, uid, data=data)
+    pending = [key for key in FIELDS if profile.get(key) is None or key == "activity" and profile.get(key) not in ACTIVITY]
+    if not value.get("preferences_done") and not profile.get("preferences"):
+        pending.append("preferences")
+    if not value.get("timezone_done"):
+        pending.append("timezone")
+    visited = value.get("visited", [])
+    route = [key for key in value.get("route", []) if key != "review" and (key in visited or key in pending)]
+    route.extend(key for key in pending if key not in route)
+    route.append("review")
+    save(uid, {**value, "route": route})
+    await show_question(message, uid, step, data=data)
+
+
+async def show_question(message, uid, step, *, data=None):
+    value = load(uid)
+    data = data or await bridge.api("/dashboard", {"telegram_user_id": uid})
+    if load(uid).get("token") != value.get("token"):
+        return
+    if step != value.get("step"):
+        value.update(answers=[], answers_step=step, clarification=None)
     token = secrets.token_hex(4)
-    save(uid, {**value, "status": "active", "step": step, "token": token})
+    value = {**value, "status": "active", "step": step, "token": token,
+             "visited": list(dict.fromkeys([*value.get("visited", []), step]))}
+    save(uid, value)
     if not await section_access(message, uid, step):
         return
     if not current(uid, token):
@@ -163,8 +177,48 @@ async def advance(message, uid, *, data=None):
         choices = [(label, key) for key, label in ACTIVITY.items()]
     elif step == "eligibility":
         choices = [("Да, рассчитать норму", "eligible"), ("Нет / не уверен", "ineligible")]
-    await message.answer(PROMPTS[step], parse_mode=None,
-                         reply_markup=markup(token, choices, skippable=step == "preferences"))
+    saved_zone = data.get("settings", {}).get("timezone") if value.get("timezone_done") else None
+    if step in LABELS and display(step, data.get("profile", {}), saved_zone) != "не указано":
+        choices.append(("Оставить как есть", "keep"))
+    text = PROMPTS[step] if step == "eligibility" else question(step, {**value, "timezone": saved_zone}, data.get("profile", {}), clarification=value.get("clarification"))
+    await message.answer(text, parse_mode=None,
+                         reply_markup=markup(token, choices, skippable=step == "preferences", back=True))
+
+
+async def review(message, uid, *, data=None):
+    from .mentor import button
+    from .mentor_panel import MentorPanel, ReplyCards
+    if isinstance(message, (MentorPanel, ReplyCards)):
+        message.kind = "form"
+    value = load(uid)
+    data = data or await bridge.api("/dashboard", {"telegram_user_id": uid})
+    if load(uid).get("token") != value.get("token"):
+        return
+    value = {**value, "status": "active", "step": "review", "editing": False,
+             "token": secrets.token_hex(4), "answers": [], "clarification": None}
+    save(uid, value)
+    if not await section_access(message, uid, "review") or not current(uid, value["token"]):
+        return
+    rows = []
+    for field in (*FIELDS, "preferences", "restrictions", "timezone"):
+        shown = display(field, data.get("profile", {}), data.get("settings", {}).get("timezone") if value.get("timezone_done") else None)
+        label = f"{LABELS[field]}: {shown}"
+        rows.append([button(label[:55] + ("…" if len(label) > 55 else ""), f"setup:{value['token']}:edit_{field}")])
+    ready = not needs_profile(data) and value.get("timezone_done")
+    label = "Всё верно, продолжить" if ready else "Продолжить заполнение"
+    rows.append([button(label, f"setup:{value['token']}:review_continue")])
+    if ready and data.get("workspace", {}).get("target"):
+        rows.append([button("Рассчитать новый ориентир", f"setup:{value['token']}:recalculate")])
+    rows.append([button("Продолжить позже", f"setup:{value['token']}:later")])
+    await message.answer(summary(data, value), parse_mode=None, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+async def discard_draft(uid, value):
+    if value.get("step") != "target" or not value.get("draft_id"):
+        return
+    result = await bridge.api("/workspace/record", {"telegram_user_id": uid, "entry_id": value["draft_id"]})
+    if current(uid, value["token"]) and result["entry"].get("status") == "draft":
+        await bridge.api("/workspace/action", {"telegram_user_id": uid, "entry_id": value["draft_id"], "action": "cancel"})
 
 
 async def resume(message, uid):
@@ -174,10 +228,16 @@ async def resume(message, uid):
     value = load(uid)
     value = {**value, "status": "active", "token": secrets.token_hex(4)}
     save(uid, value)
-    if value.get("step") == "timezone_confirm" and not value.get("timezone_done"):
-        if await section_access(message, uid, "timezone_confirm") and current(uid, value["token"]):
+    if value.get("step") in {"timezone_confirm", "eligibility"}:
+        if await section_access(message, uid, value["step"]) and current(uid, value["token"]):
             await repeat_confirmation(message, uid, value)
         return
+    if value.get("step") == "review":
+        return await review(message, uid)
+    if value.get("step") in LABELS and value.get("step") in PROMPTS:
+        if not value.get("route") and not value.get("editing"):
+            return await advance(message, uid)
+        return await show_question(message, uid, value["step"])
     if value.get("step") == "target" and value.get("draft_id"):
         if not await section_access(message, uid, "target"):
             return
@@ -187,7 +247,7 @@ async def resume(message, uid):
         if result["entry"].get("status") == "draft":
             from .mentor_flows import draft_text
             return await message.answer(draft_text(result["entry"]), parse_mode=None,
-                reply_markup=markup(value["token"], [("Сохранить мою норму", "save_target"), ("Пока без нормы", "cancel_target")]))
+                reply_markup=markup(value["token"], [("Сохранить мою норму", "save_target"), ("Пока без нормы", "cancel_target")], back=True))
     await advance(message, uid)
 
 
@@ -212,7 +272,7 @@ async def repeat_confirmation(message, uid, value):
         from .mentor_flows import draft_text
         text = draft_text(result["entry"])
         choices = [("Сохранить мою норму", "save_target"), ("Пока без нормы", "cancel_target")]
-    await message.answer(text, parse_mode=None, reply_markup=markup(value["token"], choices))
+    await message.answer(text, parse_mode=None, reply_markup=markup(value["token"], choices, back=True))
 
 
 async def finish(message, uid, text):
@@ -227,7 +287,8 @@ async def finish(message, uid, text):
                  if timezone_only else "С чего начнём? Можно записать первый приём пищи или задать вопрос о питании и привычках. Тренировки, курс и прогресс доступны в меню.")
     await message.answer(text+"\n\n"+next_step,
                          parse_mode=None, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                             [button("Добавить еду", "meal")], [button("Спросить наставника", "question")],
+                             [button("Добавить еду", "meal")], [button("План на сегодня", "daily_plan")],
+                             [button("Спросить наставника", "question")],
                              [button("Меню наставника", "menu")]]))
 
 
@@ -256,11 +317,12 @@ async def calculate(message, uid, token):
         return
     entry = result_draft["entry"]
     from .mentor_flows import draft_text
-    value = {**load(uid), "step": "target", "draft_id": entry["id"], "token": secrets.token_hex(4)}
+    value = {**load(uid), "step": "target", "draft_id": entry["id"], "token": secrets.token_hex(4),
+             "calculation_profile": {k: data.get("profile", {}).get(k) for k in NUTRITION_FIELDS}}
     save(uid, value)
     await message.answer(draft_text(entry)+"\n\n"+result.get("note", "Это ориентир, а не медицинское назначение.")+
                          "\n\nПосле сохранения я смогу сравнивать дневник с этой нормой.", parse_mode=None,
-                         reply_markup=markup(value["token"], [("Сохранить мою норму", "save_target"), ("Пока без нормы", "cancel_target")]))
+                         reply_markup=markup(value["token"], [("Сохранить мою норму", "save_target"), ("Пока без нормы", "cancel_target")], back=True))
 
 
 async def update_profile(uid, patch, text, key, *, token=None):
@@ -309,6 +371,44 @@ async def callback(query, state, message):
         if value.get("status") != "active":
             return True
         step = value.get("step")
+        if choice == "back":
+            if value.get("editing") or step in {"target", "eligibility"}:
+                await discard_draft(uid, value)
+                if current(uid, value["token"]):
+                    await review(message, uid)
+                return True
+            if step == "timezone_confirm":
+                await show_question(message, uid, "timezone")
+                return True
+            route = value.get("route", [])
+            index = route.index(step) if step in route else 0
+            if index:
+                await show_question(message, uid, route[index-1])
+            else:
+                await offer(message, uid)
+            return True
+        if step == "review":
+            if choice.startswith("edit_") and choice[5:] in LABELS and choice[5:] != "review":
+                save(uid, {**value, "editing": True})
+                await show_question(message, uid, choice[5:])
+            elif choice in {"review_continue", "recalculate"}:
+                data = await bridge.api("/dashboard", {"telegram_user_id": uid})
+                if not current(uid, value["token"]):
+                    return True
+                if needs_profile(data) or not value.get("timezone_done"):
+                    await advance(message, uid, data=data)
+                elif data.get("workspace", {}).get("target") and choice != "recalculate":
+                    await finish(message, uid, "Профиль проверен. Сохранённая норма питания остаётся без изменений.")
+                else:
+                    await show_question(message, uid, "eligibility", data=data)
+            return True
+        if choice == "keep":
+            data = await bridge.api("/dashboard", {"telegram_user_id": uid})
+            if not current(uid, value["token"]):
+                return True
+            if display(step, data.get("profile", {}), value.get("timezone") if value.get("timezone_done") else None) != "не указано":
+                await advance(message, uid, data=data)
+            return True
         if step in {"goal", "sex", "activity"}:
             labels = GOALS if step == "goal" else ACTIVITY if step == "activity" else {"male": "Мужчина", "female": "Женщина"}
             if choice not in labels:
@@ -329,7 +429,7 @@ async def callback(query, state, message):
                 return True
             save(uid, {**value, "timezone_done": True})
         elif step == "timezone_confirm" and choice == "change_timezone":
-            await advance(message, uid)
+            await show_question(message, uid, "timezone")
             return True
         elif step == "eligibility" and choice == "eligible":
             await calculate(message, uid, value["token"])
@@ -341,6 +441,16 @@ async def callback(query, state, message):
             await finish(message, uid, "Автоматическую норму не рассчитываю. Для индивидуальной нормы лучше обратиться к специалисту. Дневник и остальные разделы доступны.")
             return True
         elif step == "target" and choice in {"save_target", "cancel_target"}:
+            if choice == "save_target" and "calculation_profile" in value:
+                data = await bridge.api("/dashboard", {"telegram_user_id": uid})
+                if not current(uid, value["token"]):
+                    return True
+                if value["calculation_profile"] != {k: data.get("profile", {}).get(k) for k in NUTRITION_FIELDS}:
+                    await discard_draft(uid, value)
+                    if current(uid, value["token"]):
+                        await message.answer("Данные профиля изменились после расчёта. Проверим их перед новым расчётом; прежнюю норму не меняю.", parse_mode=None)
+                        await review(message, uid, data=data)
+                    return True
             result = await bridge.api("/workspace/action", {"telegram_user_id": uid, "entry_id": value["draft_id"],
                 "action": "confirm" if choice == "save_target" else "cancel"})
             if not current(uid, value["token"]):
@@ -371,8 +481,14 @@ def simple_patch(step, text):
     number = float(match[1].replace(",", "."))
     low, high = limits[step]
     if not low <= number <= high or step == "age" and not number.is_integer():
-        raise ValueError("Проверьте число, пожалуйста. "+PROMPTS[step])
+        units = {"age": "полных лет", "height_cm": "см", "current_weight_kg": "кг"}
+        raise AnswerError(f"Проверьте число: для этого поля ожидается значение {'больше 0 и до 500' if step == 'current_weight_kg' else f'от {low:g} до {high:g}'} {units[step]}. "
+                          + ("Возраст укажите целым числом. " if step == "age" else "") + PROMPTS[step])
     return {step: int(number) if step == "age" else number}
+
+
+class AnswerError(ValueError):
+    """A user-facing validation hint, unlike internal model/schema errors."""
 
 
 async def receive(message, state, professor_client=None, professor_bot=None, expert_client=None):
@@ -382,7 +498,7 @@ async def receive(message, state, professor_client=None, professor_bot=None, exp
         from .mentor_panel import ReplyCards
         await ReplyCards(message, state, kind="form").answer(
             "Сейчас не получилось связаться с наставником. Ваш шаг сохранён. Пожалуйста, повторите ответ чуть позже.",
-            parse_mode=None, reply_markup=markup(load(message.from_user.id).get("token", "")))
+            parse_mode=None, reply_markup=markup(load(message.from_user.id).get("token", ""), back=True))
         return False
     return result is not False
 
@@ -405,6 +521,8 @@ async def _receive(message, state, professor_client=None, professor_bot=None, ex
         if value.get("status") != "active":
             return
         step, token = value.get("step"), value["token"]
+        if value.get("last_input_id") == message.message_id:
+            return
         if not await section_access(message, uid, step) or not current(uid, token):
             return
         text = (message.text or "").strip()
@@ -425,9 +543,11 @@ async def _receive(message, state, professor_client=None, professor_bot=None, ex
             if patch is None:
                 kind = "timezone" if step == "timezone" else "onboarding_profile"
                 data = await bridge.api("/dashboard", {"telegram_user_id": uid})
-                previous = await state.get_data()
-                answers = previous.get("onboarding_answers", []) if previous.get("onboarding_step") == step else []
-                answers = [*answers[-4:], {"question": previous.get("onboarding_question", PROMPTS[step]) if answers else PROMPTS[step], "answer": text}]
+                prompt = PROMPTS.get(step, "Что хотите исправить в профиле?")
+                answers = value.get("answers", []) if value.get("answers_step") == step else []
+                answers = [*answers[-4:], {"question": (value.get("clarification") or prompt) if answers else prompt, "answer": text}]
+                value = {**value, "answers": answers, "answers_step": step}
+                save(uid, value)
                 await state.update_data(onboarding_step=step, onboarding_answers=answers)
                 result = await extract_answer(professor_client, kind,
                     answers,
@@ -441,17 +561,24 @@ async def _receive(message, state, professor_client=None, professor_bot=None, ex
                     return await enter(message, uid, state, onboarding=False)
                 if result.intent == "question":
                     pause(uid)
-                    bridge.save_opening_question(uid, PROMPTS[step]+"\nЧеловек задал встречный вопрос. Ответь на него; анкету можно продолжить кнопкой, не сохраняй предположения.")
+                    bridge.save_opening_question(uid, prompt+"\nЧеловек задал встречный вопрос. Ответь на него; анкету можно продолжить кнопкой, не сохраняй предположения.")
                     from .new_user import handle_single_ai_message
                     await handle_single_ai_message(original, state, professor_bot, professor_client, expert_client, mentor_followup=True)
                     return await message.answer("К знакомству можно вернуться, когда будет удобно.",
                         parse_mode=None, reply_markup=markup(load(uid)["token"], [("Продолжить знакомство", "begin")]))
                 patch = result.data.model_dump(exclude_none=True)
                 if result.intent == "unknown" or not patch:
-                    question = result.clarification or PROMPTS[step]
-                    await state.update_data(onboarding_question=question)
-                    return await message.answer(question, parse_mode=None, reply_markup=markup(token))
+                    clarification = result.clarification or prompt
+                    save(uid, {**load(uid), "clarification": clarification})
+                    await state.update_data(onboarding_question=clarification)
+                    return await message.answer(clarification, parse_mode=None, reply_markup=markup(token, back=True))
+                if result.clarification:
+                    # Never persist the uncertain requested value; other explicit facts can survive.
+                    patch = {} if step == "review" else {k: v for k, v in patch.items() if k != step}
             if step == "timezone":
+                if result is not None and result.clarification:
+                    save(uid, {**load(uid), "clarification": result.clarification})
+                    return await message.answer(result.clarification, parse_mode=None, reply_markup=markup(token, back=True))
                 zone = patch.get("timezone")
                 if not zone:
                     return await message.answer(PROMPTS[step], parse_mode=None)
@@ -468,13 +595,16 @@ async def _receive(message, state, professor_client=None, professor_bot=None, ex
                 return
             if load(uid).get("token") != token or not active(uid):
                 return
-            if step == "preferences" and patch.get("preferences"):
-                save(uid, {**value, "preferences_done": True})
-            if result is not None and result.clarification and step not in patch and not data.get("profile", {}).get(step):
+            save(uid, {**load(uid), "last_input_id": message.message_id,
+                       **({"preferences_done": True} if patch.get("preferences") else {})})
+            if result is not None and result.clarification:
+                save(uid, {**load(uid), "clarification": result.clarification})
                 await state.update_data(onboarding_question=result.clarification)
-                return await message.answer(result.clarification, parse_mode=None, reply_markup=markup(token))
+                return await message.answer(result.clarification, parse_mode=None, reply_markup=markup(token, back=True))
+            if step == "review":
+                return await review(message, uid)
             await advance(message, uid)
         except (bridge.BridgeError, ValueError, ZoneInfoNotFoundError) as error:
-            note = str(error) if isinstance(error, bridge.BridgeError) else "Не получилось уточнить эти данные. "+PROMPTS.get(step, "Попробуйте ещё раз.")
+            note = str(error) if isinstance(error, (bridge.BridgeError, AnswerError)) else "Не получилось уточнить эти данные. "+PROMPTS.get(step, "Что хотите исправить в профиле?")
             from .mentor import back_keyboard
-            await message.answer(note, parse_mode=None, reply_markup=markup(token) if current(uid, token) else back_keyboard())
+            await message.answer(note, parse_mode=None, reply_markup=markup(token, back=True) if current(uid, token) else back_keyboard())

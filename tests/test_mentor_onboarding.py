@@ -86,6 +86,8 @@ def test_full_onboarding_saves_each_fact_and_requires_target_confirmation(backen
         assert data["settings"]["timezone"] == "UTC"
         await click("confirm_timezone")
         assert data["settings"]["timezone"] == "Asia/Yerevan"
+        assert setup.load(123)["step"] == "review"
+        await click("review_continue")
         assert setup.load(123)["step"] == "eligibility"
         assert not any(c.args[0] == "/workspace/nutrition/preview" for c in api.await_args_list)
         await click("eligible")

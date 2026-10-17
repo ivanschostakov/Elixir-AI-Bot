@@ -58,7 +58,7 @@ def test_complete_legacy_profile_gets_only_timezone_confirmation(legacy, progres
     assert timezone_label(zone) in msg.answer.await_args.args[0]
     assert zone not in msg.answer.await_args.args[0]
     assert callbacks(msg) == {f"mentor:setup:{current['token']}:{choice}"
-                              for choice in ('confirm_timezone', 'change_timezone', 'later')}
+                              for choice in ('confirm_timezone', 'change_timezone', 'later', 'back')}
     assert state.values['mentor_panel']['kind'] == 'form'
     assert data == before
     assert {call.args[0] for call in api.await_args_list} == {'/dashboard'}
@@ -190,7 +190,7 @@ def test_missing_or_invalid_timezone_asks_city_without_guessing(legacy, zone):
     msg = message()
     asyncio.run(mentor.enter(msg, 123, State()))
     assert setup.load(123)['step'] == 'timezone'
-    assert msg.answer.await_args.args[0] == setup.PROMPTS['timezone']
+    assert setup.PROMPTS['timezone'] in msg.answer.await_args.args[0]
     assert {call.args[0] for call in api.await_args_list} == {'/dashboard'}
 
 

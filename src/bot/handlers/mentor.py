@@ -399,6 +399,8 @@ async def perform_action(query,state,message,professor_bot=None,professor_client
         if action=="question": return await ask(message,uid,QUESTIONS["question"])
         if action in {"nutrition","history","data"}:
             data=await api("/dashboard",{"telegram_user_id":uid})
+            if action == "data":
+                return await setup.review(message, uid, data=data)
             section={"nutrition":"food","history":"progress","data":"profile"}[action]
             text={"nutrition":today_text,"history":history_text,"data":lambda d:profile_text(d['profile'])}[action](data)
             if action=="data": save_opening_question(uid,text)
