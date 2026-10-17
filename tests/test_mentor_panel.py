@@ -41,6 +41,20 @@ def test_callback_renders_one_edit_and_no_send_even_for_multi_block_workout():
     asyncio.run(run())
 
 
+def test_root_offer_preserves_explicit_skip_to_menu_button():
+    from aiogram.types import InlineKeyboardMarkup
+    async def run():
+        msg, state = message(), State()
+        panel = MentorPanel(msg, state, action="open")
+        await panel.answer("Начнём знакомство?", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [button("Начать", "setup:token:begin")], [button("Пока открыть меню", "menu")]]))
+        await panel.flush()
+        buttons = msg.edit_text.await_args.kwargs["reply_markup"].inline_keyboard
+        assert [(b.text, b.callback_data) for row in buttons for b in row] == [
+            ("Начать", "mentor:setup:token:begin"), ("Пока открыть меню", "mentor:menu")]
+    asyncio.run(run())
+
+
 def test_long_text_is_paginated_without_truncating_or_sending():
     async def run():
         msg, state = message(), State()

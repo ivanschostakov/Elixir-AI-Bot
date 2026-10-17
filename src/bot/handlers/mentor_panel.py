@@ -327,8 +327,10 @@ async def show_page(message, pages, token, index, *, root=False, send=False):
         paging.append(InlineKeyboardButton(text="→", callback_data=f"mentor:page:{token}:{index+1}"))
     if paging:
         rows.append(paging)
-    if not root:
-        rows.append(home or [InlineKeyboardButton(text="← Меню наставника", callback_data="mentor:menu")])
+    if home:
+        rows.append(home)
+    elif not root:
+        rows.append([InlineKeyboardButton(text="← Меню наставника", callback_data="mentor:menu")])
     text = page["text"] + (f"\n\n{index+1} / {len(pages)}" if len(pages) > 1 else "")
     markup = InlineKeyboardMarkup(inline_keyboard=rows)
     if send:
