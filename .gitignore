@@ -45,3 +45,6 @@ backup/
 *.sqlite3
 *.sqlite3-*
 .amocrm_playwright_profile*/
+
+# Local configuration templates and private runtime files
+*.sqlite*
