@@ -2,6 +2,13 @@
 
 Python service that runs three specialized Telegram AI assistants for the Elixir Peptide ecosystem. The assistants share operational infrastructure while keeping their prompts, credentials, and conversation behavior independently configurable.
 
+## Related Services
+
+- [Shop Application](https://github.com/ivanschostakov/Elixir-Shop-Application): mobile commerce application, backend, administration, and the coordinated mentor integration package.
+- [Shop Webapp](https://github.com/ivanschostakov/Elixir-Shop-Webapp): web commerce and internal bot API services.
+
+These are separate deployable services. Match the configured API endpoints and backend contract to the bot version before updating an installation.
+
 ## Highlights
 
 - Runs three polling bots concurrently with automatic restart and graceful shutdown.
