@@ -4,7 +4,8 @@ import time
 from typing import Callable, Awaitable, Any
 
 from aiogram import BaseMiddleware
-from aiogram.types import TelegramObject
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import CallbackQuery, TelegramObject
 
 
 class ContextMiddleware(BaseMiddleware):
@@ -47,6 +48,12 @@ class ContextMiddleware(BaseMiddleware):
 
         self.logger.info("Update start | update_id=%s | event=%s | user_id=%s | chat_id=%s", update_id, event_name, user_id, chat_id)
         try: result = await handler(event, data)
+        except TelegramBadRequest as error:
+            if not isinstance(event, CallbackQuery) or "message is not modified" not in str(error).lower():
+                raise
+            # Repeated taps on the current menu are successful no-ops.
+            await event.answer()
+            result = None
         except Exception:
             elapsed_ms = int((time.monotonic() - started) * 1000)
             self.logger.exception("Update failed | update_id=%s | event=%s | user_id=%s | chat_id=%s | elapsed_ms=%d", update_id, event_name, user_id, chat_id, elapsed_ms)

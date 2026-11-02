@@ -5,6 +5,8 @@ import io
 import logging
 import mimetypes
 import time
+import asyncio
+from weakref import WeakValueDictionary
 
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,7 @@ from config import (
     BOT_KEYWORDS,
     INSTRUCTIONS_DIR,
 )
+from src.ai.telegram_mentor import mentor_conversation, save_mentor_conversation
 
 class ProfessorClient(AsyncClient):
     def __init__(self, api_key: str, assistant_id: str | None = None, *args, keyword: str | None = None, **kwargs):
@@ -28,6 +31,7 @@ class ProfessorClient(AsyncClient):
         self.__keyword = resolved_keyword
         self.__model = "gpt-5.6-terra" if self.__keyword == "new" else "gpt-5-mini"
         self.__conversation_input_tokens: dict[str, int] = {}
+        self.__plain_locks = WeakValueDictionary()
 
     @property
     def instructions(self) -> str:
@@ -137,10 +141,36 @@ class ProfessorClient(AsyncClient):
 
         return (getattr(transcription, "text", None) or "").strip()
 
-    async def create_conversation(self, user_id: int | None = None):
-        metadata = {"user_id": f"{user_id}"} if user_id is not None else None
-        conversation = await self.conversations.create(metadata=metadata if metadata else None)
+    async def create_conversation(self, user_id: int | None = None, *, items=None):
+        metadata = {"bot_keyword": self.__keyword}
+        if user_id is not None: metadata["user_id"] = str(user_id)
+        conversation = await self.conversations.create(metadata=metadata, **({"items": items} if items else {}))
+        if user_id is not None and catalog_context.get() is None:
+            save_mentor_conversation(user_id, "assistant:" + self.__keyword, conversation.id)
         return conversation.id
+
+    async def _continue_in_new_conversation(self, old_id: str | None, user_id: int) -> str:
+        items = []
+        if old_id:
+            try:
+                old = await self.conversations.retrieve(old_id)
+                metadata = old.metadata or {}
+                if metadata.get("user_id") == str(user_id) and metadata.get("bot_keyword", self.__keyword) == self.__keyword:
+                    page = await self.conversations.items.list(old_id, order="desc", limit=20)
+                    budget = 16000
+                    for entry in page.data:
+                        if getattr(entry, "type", None) != "message" or entry.role not in {"user", "assistant"}: continue
+                        content = "\n".join(part.text for part in entry.content
+                            if getattr(part, "type", None) in {"input_text", "output_text"})
+                        if not content or budget <= 0: continue
+                        content = content[-min(len(content), budget):]
+                        items.append({"role": entry.role, "content": content})
+                        budget -= len(content)
+                    items.reverse()
+            except (BadRequestError, NotFoundError):
+                self.__logger.warning("Previous conversation cannot be recovered; starting a scoped conversation")
+        # Carry text only: never replay function calls or financial/tool actions.
+        return await self.create_conversation(user_id=user_id, items=items)
 
     @staticmethod
     def _decode_image_payload(payload: str | None) -> bytes | None:
@@ -359,6 +389,17 @@ class ProfessorClient(AsyncClient):
         return response
 
     async def send_message_v2(self, input_text: str, conversation_id: str | None, file_contents: list[tuple[str, bytes]] | None = None, image_contents: list[tuple[str, bytes]] | None = None, user_id: int | None = None, trace_id: str | None = None) -> dict[str, Any]:
+        kwargs = dict(input_text=input_text, conversation_id=conversation_id, file_contents=file_contents,
+                      image_contents=image_contents, user_id=user_id, trace_id=trace_id)
+        if user_id is None or catalog_context.get() is not None:
+            return await self._send_message_v2(**kwargs)
+        lock = self.__plain_locks.setdefault(user_id, asyncio.Lock())
+        async with lock:
+            scoped_id = mentor_conversation(user_id, "assistant:" + self.__keyword)
+            kwargs["conversation_id"] = scoped_id or await self._continue_in_new_conversation(conversation_id, user_id)
+            return await self._send_message_v2(**kwargs)
+
+    async def _send_message_v2(self, input_text: str, conversation_id: str | None, file_contents: list[tuple[str, bytes]] | None = None, image_contents: list[tuple[str, bytes]] | None = None, user_id: int | None = None, trace_id: str | None = None) -> dict[str, Any]:
         started_at = int(time.time())
         total_started = time.monotonic()
         self.__logger.info("AI client start | trace=%s | user_id=%s | conversation_id=%s | input_len=%d | files=%d | images=%d", trace_id, user_id, conversation_id, len(input_text or ""), len(file_contents or []), len(image_contents or []))
@@ -398,7 +439,7 @@ class ProfessorClient(AsyncClient):
                     rollover_reason,
                 )
                 old_conversation_id = active_conversation_id
-                active_conversation_id = await self.create_conversation(user_id=user_id)
+                active_conversation_id = await self._continue_in_new_conversation(old_conversation_id, user_id)
                 self.__conversation_input_tokens.pop(old_conversation_id, None)
                 self.__conversation_input_tokens.setdefault(active_conversation_id, 0)
                 conversation_reset_reason = rollover_reason
@@ -427,7 +468,7 @@ class ProfessorClient(AsyncClient):
             self.__logger.info("AI client step | trace=%s | stage=conversation.retry_create.start | user_id=%s", trace_id, user_id)
 
             old_conversation_id = active_conversation_id
-            active_conversation_id = await self.create_conversation(user_id=user_id)
+            active_conversation_id = await self._continue_in_new_conversation(old_conversation_id, user_id)
             if old_conversation_id: self.__conversation_input_tokens.pop(old_conversation_id, None)
             self.__conversation_input_tokens.setdefault(active_conversation_id, 0)
             self.__logger.info("AI client step | trace=%s | stage=conversation.retry_create.done | conversation_id=%s | elapsed_ms=%d", trace_id, active_conversation_id, int((time.monotonic() - step_started) * 1000))
@@ -466,7 +507,7 @@ class ProfessorClient(AsyncClient):
                 rollover_reason,
             )
             old_conversation_id = str(final_conversation_id)
-            final_conversation_id = await self.create_conversation(user_id=user_id)
+            final_conversation_id = await self._continue_in_new_conversation(old_conversation_id, user_id)
             self.__conversation_input_tokens.pop(old_conversation_id, None)
             self.__conversation_input_tokens.setdefault(str(final_conversation_id), 0)
             conversation_reset_reason = conversation_reset_reason or rollover_reason
